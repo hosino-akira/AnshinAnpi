@@ -1,0 +1,21 @@
+# Dependencies and generated output
+node_modules/
+.next/
+dist/
+out/
+coverage/
+*.tsbuildinfo
+
+# Local development and hosting state
+.sites-runtime/
+.wrangler/
+.vercel/
+*.log
+
+# Local configuration and private keys
+.env*
+*.pem
+
+# Operating system metadata
+.DS_Store
+Thumbs.db
