@@ -1,0 +1,12 @@
+.git
+.env*
+**/.env*
+backend/.local-terminal.json
+**/node_modules
+**/.next
+**/dist
+**/.wrangler
+**/*.docx
+**/*.png
+**/*.log
+backend/test

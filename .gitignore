@@ -6,16 +6,49 @@ out/
 coverage/
 *.tsbuildinfo
 
+# Tool caches
+.cache/
+.vite/
+.eslintcache
+
+# Python cache and local virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
 # Local development and hosting state
 .sites-runtime/
 .wrangler/
 .vercel/
 *.log
+*.log.*
 
 # Local configuration and private keys
 .env*
+!.env.example
+.aws/
 *.pem
+*.key
+*.p12
+*.pfx
+backend/.local-terminal.json
+
+# Local database exports and backups (keep migration SQL tracked)
+/database/backups/
+/database/dumps/
+*.dump
+*.backup
+
+# Editor metadata, swap files, and Office lock files
+.idea/
+.vs/
+*.swp
+*.swo
+*~
+~$*
 
 # Operating system metadata
 .DS_Store
 Thumbs.db
+Desktop.ini
