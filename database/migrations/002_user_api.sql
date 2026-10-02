@@ -3,7 +3,7 @@ BEGIN;
 SET LOCAL TIME ZONE 'UTC';
 SET LOCAL search_path = public, pg_catalog;
 SELECT pg_advisory_xact_lock(17001001);
-SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '002_user_api') AS already_applied \gset
+SELECT EXISTS (SELECT 1 FROM app_meta.schema_migrations WHERE version = '002_user_api') AS already_applied \gset
 \if :already_applied
     \echo '002_user_api already applied; skipping.'
 \else
@@ -115,6 +115,6 @@ $$;
 CREATE TRIGGER users_revoke_api AFTER UPDATE OF status ON users
     FOR EACH ROW EXECUTE FUNCTION revoke_user_api_access();
 
-INSERT INTO schema_migrations(version) VALUES ('002_user_api');
+INSERT INTO app_meta.schema_migrations(version) VALUES ('002_user_api');
 \endif
 COMMIT;

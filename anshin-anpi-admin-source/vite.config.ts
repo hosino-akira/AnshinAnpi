@@ -1,5 +1,7 @@
 import vinext from "vinext";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
+import { resolve } from "node:path";
+import { createTerminalMiddleware } from "./build/local-terminal-proxy.mjs";
 import hostingConfig from "./.openai/hosting.json";
 import { sites } from "./build/sites-vite-plugin";
 
@@ -33,7 +35,9 @@ const localBindingConfig = {
     : [],
 };
 
-export default defineConfig(async () => {
+export default defineConfig(async ({ command, mode }) => {
+  const localEnv = loadEnv(mode, process.cwd(), "ANSHIN_");
+  const localFaceEnabled = command === "serve" && localEnv.ANSHIN_DEV_FACE_ENABLED === "true";
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= "false";
@@ -45,13 +49,23 @@ export default defineConfig(async () => {
 
   return {
     server: {
-      host: "0.0.0.0",
+      host: localFaceEnabled ? "127.0.0.1" : "0.0.0.0",
       allowedHosts: ["terminal.local"],
       ...(isCodexSeatbeltSandbox
         ? { watch: { useFsEvents: false, usePolling: true } }
         : {}),
     },
     plugins: [
+      ...(localFaceEnabled ? [{
+        name: "anshin-local-terminal",
+        apply: "serve" as const,
+        configureServer(server: import("vite").ViteDevServer) {
+          server.middlewares.use(createTerminalMiddleware({
+            backendUrl: localEnv.ANSHIN_BACKEND_URL || "http://127.0.0.1:3002",
+            credentialsPath: resolve(process.cwd(), "../backend/.local-terminal.json"),
+          }));
+        },
+      }] : []),
       vinext(),
       sites(),
       cloudflare({

@@ -1,121 +1,62 @@
-# 用户端接口合同
+# 用户端接口合同（最终流程）
 
-基础路径为 `http://localhost:3001`，JSON/UTF-8。日期为 UTC ISO 8601，界面按 `GET /v1/terminal` 返回的设施时区显示。所有返回均设置 `Cache-Control: no-store`，服务端日志不记录姓名、邮箱、图片、用户令牌、终端凭据或原始异常详情。
+版本 0.2.0，2026-10-02。主机开发地址 `http://localhost:3002`，局域网地址 `http://192.168.0.51:3002`；Docker 端口由 compose 与 .env 决定。JSON/UTF-8，时间为 UTC ISO 8601，终端时区由 GET /v1/terminal 返回。所有接口返回 Cache-Control: no-store。
 
-## 请求头
+完整请求、响应、前端代码及局域网代理配置见 [最终版前端交接文档](FRONTEND_FACE_HANDOFF.md)。机器合同见 [OpenAPI JSON](openapi.json)，在线地址 /openapi.json。字段以代码生成的合同为准。
 
-```http
-X-Terminal-Id: <终端 UUID>
-X-Terminal-Token: <终端随机凭据>
-Authorization: Bearer <短期 user_token>
-Idempotency-Key: <本次操作 UUID>
-Content-Type: application/json
-```
+## 主流程
 
-前两项在所有业务接口中必需；Authorization 在已识别用户的操作中必需。所有写操作必须带幂等键。重试同一操作时保留同一键和相同参数；不同参数或不同用户令牌使用同一键返回 `409 IDEMPOTENCY_CONFLICT`。成功重放带 `Idempotency-Replayed: true`。幂等成功应答加密保留 15 分钟；键过期后开始新的用户操作，不自动重复旧发送。
-
-## 接口与画面对应
-
-| 方法与路径 | 用途/画面 | 请求内容 | 用户令牌 |
+| 步骤 | 方法与路径 | 正文 | 返回 |
 | --- | --- | --- | --- |
-| `GET /v1/terminal` | SCR-00/01：终端、时区、服务能力 | 无 | 无 |
-| `GET /v1/consent-policies?type=registration` | SCR-04：当前登记同意文面 | 查询参数 `registration` 或 `safety` | 无 |
-| `POST /v1/enrollments` | SCR-02：开始临时登记 | `{}` | 无 |
-| `GET /v1/enrollments/{id}` | 登记进度 | 无 | 无 |
-| `PATCH /v1/enrollments/{id}/profile` | SCR-03：暂存姓名 | `display_name` | 无 |
-| `POST /v1/faces/liveness-sessions` | SCR-02/07/10：创建生体会话 | `purpose`，登记拍摄时加 `enrollment_id` | `purpose=registration` 时需要 |
-| `POST /v1/enrollments/{id}/face` | SCR-02：核验初次脸部拍摄 | `liveness_session_id` | 无 |
-| `POST /v1/enrollments/{id}/consent` | SCR-04：记录同意或拒绝 | `policy_version`、`result` | 无 |
-| `PUT /v1/enrollments/{id}/recipients` | SCR-05/06：暂存联系人 | `recipients: [{name,email}]` | 无 |
-| `POST /v1/enrollments/{id}/complete` | SCR-06：原子保存正式登记 | `{}` | 无 |
-| `DELETE /v1/enrollments/{id}` | 取消未完成登记 | `{}` | 无 |
-| `POST /v1/faces/verify-registration` | SCR-07：登记后再拍摄核验 | `liveness_session_id` | 登记令牌 |
-| `POST /v1/faces/identify` | SCR-10：识别有效登记人 | `liveness_session_id` | 无 |
-| `POST /v1/users/me/confirmation` | SCR-07/11：确认本人姓名 | `confirmed: true/false` | 必需 |
-| `GET /v1/users/me/recipients` | SCR-12：联系人姓名及掩码邮箱 | 无 | 必需且已确认本人 |
-| `POST /v1/enrollments/{id}/confirmation-mails` | SCR-08：登记确认邮件 | `{}` | 已核验并确认的登记令牌 |
-| `POST /v1/safety-checks` | SCR-13：都度同意并发信 | `policy_version`、`consent: true` | 安否令牌且已确认本人 |
-| `GET /v1/safety-checks/{id}` | SCR-08/14：轮询发送结果 | 无 | 同一用户及终端 |
-| `POST /v1/safety-checks/{id}/retry` | 只重试允许的失败宛先 | `{}` | 必需 |
-| `DELETE /v1/sessions/current` | 完成、取消、返回首页时销毁用户令牌 | `{}` | 必需 |
-| `POST /v1/mail/webhooks` | SES 发送/配信/退信/投诉通知 | AWS SNS 签名通知 | 使用 SNS 签名验证 |
+| 注册① | POST /v1/registrations/capture | image_base64 | 201 temp_id、face_valid、质量指标 |
+| 注册② | GET /v1/consent-policies?type=registration | 无 | 当前 title、body、policy_version |
+| 注册③ | POST /v1/registrations | temp_id、display_name、recipients、policy_version、consent_result | 201 正式 user_id、pending_registration、user_token |
+| 注册④ | POST /v1/registrations/verify | user_id、image_base64 | 200 比对结果；通过自动创建登记邮件批次，返回 check_id、新 user_token |
+| 注册⑤ | GET /v1/mail-results/{check_id} | 无 | 逐项邮件状态、registration_completed、user_status |
+| 安否① | POST /v1/faces/identify | image_base64 | 200 matched/result/metrics；匹配时返回姓名、user_id、user_token |
+| 安否② | POST /v1/users/{user_id}/recipients | confirmed: true/false | 确认本人后返回联系人姓名、masked_email、发送同意正文和版本 |
+| 安否③ | POST /v1/safety-notifications | user_id、consent: true/false、policy_version | 202 check_id、逐项 queued；拒绝为 200 cancelled，不发信 |
+| 安否结果 | GET /v1/mail-results/{check_id} | 无 | mail_status、recipient_results |
 
-健康检查为 `/health/live`、`/health/ready`，OpenAPI 为 `/openapi.json`。当前合同统一使用 `faces` 路径；旧前端集成指南中的例示路径须按此表替换。
+注册①临时 ID 不是用户记录；注册③一次保存姓名、1–2 个不重复邮箱联系人、同意结果与人脸特征引用。首次图片无需先建立用户或记录完整登记同意，但前端应在上传前取得本次照片处理授权。完整登记同意在注册③记录。
 
-## 初次登记顺序
+正常登记状态 pending_registration → active。第二次验证成功后发送的是“連絡先登録のお知らせ”，不额外发送安否通知。全部登记邮件受理成功时才 active；部分失败保持 pending_registration。安否识别只允许 active 用户。注册④没有匹配返回 matched=false，不创建邮件请求，也不撤销原令牌；使用新照片和新请求编号重拍。图片模式不做活体检测。
 
-1. 获取登记同意文面，`POST /v1/enrollments` 返回 `temp_id`、`expires_at`。
-2. 创建 `purpose=enrollment` 的生体会话并提供 `enrollment_id=temp_id`。前端使用 AWS Face Liveness 专用组件和受限临时 AWS 凭据完成视频挑战；随后提交 session ID 到 `/enrollments/{id}/face`。后端从 AWS 获取生体得分与参考图，不接受客户端提交 `liveness_passed`、匹配分数或模板。
-3. 通过 profile 暂存姓名，姓名规范化后为 1～50 字符，禁止空白、控制字符及 HTML 标记。
-4. 提交登记同意，`result=granted` 或 `denied`。拒绝会即时移除临时数据，不创建用户或云端 Collection 特征。
-5. 提交 1～2 名联系人，邮箱格式和去重由服务器验证。确认登记后调用 complete，返回 `user_id`、`status=pending_registration`、`user_token`、`expires_at`。该时点才向 Collection 索引脸部特征并在事务中保存密文；Redis 中原始参考图随后清除。
-6. 携带登记令牌创建 `purpose=registration` 生体会话，然后调用 verify-registration。匹配成功返回姓名和新的用户令牌；旧令牌失效。
-7. 用新令牌确认本人姓名，再调用 confirmation-mails。至少一个宛先达到 `accepted` 后，后台将用户设为 `active`。全部失败不会完成登记。
-8. 完成后删除当前会话，界面清除个人信息并停止摄像头。已持久化但未完成邮件确认的登记取消，应由工作人员处理，不能通过临时登记 DELETE 擅自删除正式记录。
+文书位于 backend/config/consent-policies.json，当前为开发用 dev-v1。发布新正文同时更新版本并重启后端；提交旧版本返回 409 POLICY_VERSION_CHANGED。consents 表只记录决定及版本，不存文书正文。
 
-Redis 数据最长 15 分钟、90 秒无操作失效；终端需在页面取消、退出或超时时调用取消接口。临时信息不会进入业务数据库或原始图片日志。生体会话约 3 分钟内完成且只能消费一次，绑定用途、终端及登记/用户会话。
+## 鉴权与防重复
 
-## 安否操作顺序
+公开：GET /health/live、/health/ready、/openapi.json、/v1/consent-policies。其余业务接口使用 X-Terminal-Id 与 X-Terminal-Token；注册④/⑤、安否②/③/结果需要 Authorization: Bearer <user_token>。终端凭据由 BFF 添加，不传入浏览器代码。
 
-创建 `purpose=safety` 生体会话，完成挑战后调用 identify。只有 `result=matched` 才返回 `display_name`、`user_token` 与期限；`no_match`、`ambiguous` 不含姓名或令牌。3 次连续识别或生体失败后冷却 5 分钟。
+所有 POST、PATCH、PUT、DELETE 请求必须带 Idempotency-Key；SNS Webhook 例外。对同一操作重试保留相同编号、正文和原令牌；同一编号不同内容返回 409 IDEMPOTENCY_CONFLICT。成功重放带 Idempotency-Replayed: true，内存成功响应保留 15 分钟。注册④令牌轮换后，下一步用新令牌；原步骤重试用原令牌。
 
-确认姓名后，读取掩码联系人；获取 `type=safety` 最新文面，调用 safety-checks：
+临时草稿最长 15 分钟、闲置 90 秒过期；GET /v1/registrations/{temp_id} 可查询并续闲置期，不能延长最长截止时间。用户会话最长 3 分钟，闲置 90 秒失效。临时存储为单进程内存，无 Redis。重启丢失草稿和会话，但 safety_checks 的防重复编号持久化，不会重复创建邮件批次。已提交的注册④重放可恢复结果查询令牌和原 check_id；recovered=true，similarity_score=null。其他旧会话失效需重新识别。
 
-```json
-{ "policy_version": "dev-v1", "consent": true }
-```
+## 辅助接口
 
-响应 HTTP 202：
-
-```json
-{
-  "check_id": "<UUID>",
-  "status": "queued",
-  "recipient_results": [
-    { "delivery_id": "<UUID>", "recipient_id": "<UUID>", "status": "queued" }
-  ]
-}
-```
-
-轮询 `/v1/safety-checks/{check_id}`，返回每个收件人的状态、受付/配信时间、尝试次数和固定错误码，不返回完整邮箱。本人确认、脸部验证、本次同意、终端和每个收件人均由后端关联检查；客户端不能把 user_id 换成另一人。
-
-用户令牌有效期最多 3 分钟、90 秒无操作失效。一次成功识别证据只能授权一个发送事件；其他发送须重新识别。同一键重试返回原事件，不重复发信。
-
-## 状态与重试
-
-| 宛先状态 | 前端含义 |
-| --- | --- |
-| `queued` | 等待处理，不能显示成功 |
-| `sending` | 外部请求进行中，不能显示成功 |
-| `accepted` | 邮件服务商已接受，符合规格书的“送信受付済み” |
-| `delivered` | 服务商报告送达，不代表已阅读 |
-| `bounced` | 无法配信，联系人待修正 |
-| `failed` | 明确失败，根据错误码决定是否可重试 |
-| `unknown` | 请求超时或中断，可能已经发送；等待签名回调或工作人员核对 |
-| `cancelled` | 授权状态/有效期限已变化，未继续发送 |
-
-事件状态为 queued/processing/accepted/partially_accepted/failed/unknown/cancelled。部分成功只展示已接受与失败的具体收件人。每封邮件只含一个 To 地址，最多尝试 3 次。只对明确限流等暂时失败指数退避；`unknown` 从不自动重发。回调可把 unknown 恢复为 accepted/delivered/bounced；乱序 accepted 不会覆盖 delivered/bounced。服务崩溃遗留的 sending 超过 45 秒后设为 unknown。
-
-工作进程在真正发送前再次锁定并检查用户、终端、联系人、同意和期限，禁止恢复后补发已经过期的操作。retry 只允许当前有效期限内、尝试次数不足 3、`failed + MAIL-002` 的宛先；受付成功、永久失败及结果未知均不允许重发。
-
-## 错误
-
-统一响应：
-
-```json
-{ "error": { "code": "USER_SESSION_EXPIRED", "message": "もう一度、顔を確認してください。", "request_id": "<UUID>" } }
-```
-
-| HTTP | 常见错误码 | 处理 |
+| 方法与路径 | 用途 | 令牌 |
 | --- | --- | --- |
-| 400 | `VALIDATION_ERROR`、`IDEMPOTENCY_KEY_REQUIRED` | 修正输入/请求头 |
-| 401 | `TERMINAL_AUTH_FAILED`、`USER_SESSION_EXPIRED`、`FACE_VERIFICATION_EXPIRED` | 检查终端或重新识别 |
-| 403 | `IDENTITY_CONFIRMATION_REQUIRED` | 先确认本人姓名 |
-| 404 | `NOT_FOUND` | 结果不属于当前用户/终端或不存在 |
-| 409 | `STATE_CONFLICT`、`POLICY_VERSION_CHANGED`、`IDEMPOTENCY_CONFLICT`、`SESSION_ALREADY_USED` | 按状态重新操作，避免自动重复发送 |
-| 410 | `TIME-001`、`LIVENESS_SESSION_EXPIRED` | 清空界面并重新开始 |
-| 422 | `FACE-001/002/004`、`FACE_QUALITY_FAILED` | 按画面指示重新拍摄 |
-| 429 | `FACE-004`、`RATE_LIMITED` | 冷却等待或联系工作人员 |
-| 503 | `SERVICE_NOT_CONFIGURED`、`POLICY_NOT_AVAILABLE`、`FACE_SERVICE_UNAVAILABLE` | 显示服务未就绪，不能显示成功 |
+| GET /v1/terminal | 终端时区、服务配置能力 | 终端凭据 |
+| GET /v1/registrations/{temp_id} | 草稿进度和有效期 | 终端凭据 |
+| DELETE /v1/registrations/{temp_id} | 丢弃临时图片和草稿，正文 {} | 终端凭据 |
+| POST /v1/mail-results/{check_id}/retry | 重试允许重试的失败联系人，正文 {} | 同用户/终端且已验证确认 |
+| DELETE /v1/sessions/current | 结束当前会话，正文 {} | 当前用户令牌 |
+| POST /v1/mail/webhooks | SES 通知处理 | SNS 签名与允许的 Topic，非前端接口 |
 
-需要 staff 处理的结果不应在界面暴露具体内部异常、服务商凭据或生体得分。
+mail_status：queued/processing/accepted/partially_accepted/failed/unknown/cancelled。联系人状态：queued/sending/accepted/delivered/bounced/failed/unknown/cancelled。accepted 是发送服务已受理，不保证收件箱到达或阅读。unknown 可能已经发送，禁止自动重发。仅未过期且尝试不足 3 次的 failed + MAIL-002 宛先可手动重试；已受理的宛先不再发送。过期的等待记录在发送前取消。
+
+registration_completed 只对 type=registration 计算。type=safety 中该字段为 false，并不表示用户登记失效。退信发生在受理之后不自动撤销 active；界面仍展示 bounced，按业务处理联系人。
+
+## 图片、分数与错误
+
+image_base64 是 JPEG/PNG 纯 Base64，不含 data URL 前缀，解码后最多 512 KiB；不得提交客户端计算的分数、模板或活体标志。返回 metrics.face_confidence、brightness、sharpness；识别时返回 similarity_score 和 match_threshold，范围 0–100，无可用相似度为 null。liveness_passed=false 表示图片模式没有活体证明。
+
+400 输入格式或缺少防重复编号；401 终端/用户会话；403 用户 ID 不符/未确认本人；404 无权限访问或没有记录；409 版本/状态/幂等冲突；410 草稿过期；422 无人脸/多人脸/质量问题；429 冷却或限流；503 AWS/邮件服务配置、资源、身份或权限异常。详细错误码与示例见交接文档。
+
+## 旧接口兼容
+
+旧 POST /v1/enrollments 及其 profile/consent/recipients/face/complete、POST /v1/faces/verify-registration、/v1/users/me/*、/v1/enrollments/{id}/confirmation-mails、/v1/safety-checks* 暂时保留，在 OpenAPI 中 deprecated。旧接口仍按原有拆分流程和手动邮件步骤工作；不能把旧 verify-registration 当成新的自动通知接口。新首页和本地测试页使用上面的最终流程。
+
+可选 Face Liveness 旧入口 POST /v1/faces/liveness-sessions 保留，但最终图片合同无需 Cognito 或视频挑战。避免在同一个操作中混用两种照片处理方式。
+
+数据库仍为 [8 张业务表](../../database/README.md)，无需新增表。发送记录存 safety_checks（check_type=registration/safety），逐联系人结果存 mail_deliveries。数据库只保存加密人脸特征引用，原图不入 PostgreSQL/S3；日志不含照片、姓名、完整邮箱、用户或终端令牌。

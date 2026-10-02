@@ -1,6 +1,6 @@
 # Node.js 用户端后端
 
-使用 Node.js 22+、Fastify、PostgreSQL 和 Redis，实现开发规格书第 4～11 章的用户端接口。AWS 接入采用 SDK v3：Rekognition 负责生体检测和脸部识别、SES 负责单宛先邮件、KMS 负责持久化个人数据加密，Secrets Manager 管理生产环境密钥。
+使用 Node.js 22+、Fastify、PostgreSQL，实现开发规格书第 4～11 章的用户端接口。AWS 接入采用 SDK v3：Rekognition 负责生体检测和脸部识别、SES 负责单宛先邮件、KMS 负责持久化个人数据加密，Secrets Manager 管理生产环境密钥。
 
 ## 本地启动
 
@@ -10,7 +10,7 @@
 .\scripts\backend.ps1 -Action start
 ```
 
-该命令补齐 `.env` 中的本地随机密钥、启动 PostgreSQL 和无持久化 Redis、应用迁移、构建并启动 API。地址为 `http://localhost:3001`，可通过 `/health/ready` 检查数据库连接，通过 `/openapi.json` 获取 OpenAPI 文档。Redis 关闭 RDB/AOF，数据目录使用内存文件系统，重启后临时登记失效。
+该命令补齐 `.env` 中的本地随机密钥、启动 PostgreSQL、应用迁移、构建并启动 API。地址为 `http://localhost:3001`，可通过 `/health/ready` 检查数据库连接，通过 `/openapi.json` 获取 OpenAPI 文档。临时数据保存在单个后端进程的内存中，后端重启后未完成登记失效。
 
 需要本地终端及开发同意文面时，在 `backend` 目录运行：
 
@@ -21,7 +21,7 @@ npm run provision:dev
 
 终端凭据保存在 Git 忽略的 `backend/.local-terminal.json`，不打印到日志。这项命令只允许开发环境；开发同意文面明确标记为测试用途。它不会创建正式用户或发送邮件。
 
-开发时也可以在 PostgreSQL、Redis 已启动后运行 `npm run dev`。配置从项目根目录 `.env` 加载，既有环境变量优先。Docker 使用 `postgres:5432` 和 `redis:6379`，主机运行 Node 使用 `localhost:5433` 和 `localhost:6380`。
+开发时也可以在 PostgreSQL 已启动后运行 `npm run dev`。配置从项目根目录 `.env` 加载，既有环境变量优先。Docker 使用 `postgres:5432` ，主机运行 Node 使用 `localhost:5433` 。
 
 AWS 资源尚未配置时，普通数据与文面接口可以调用；需要识别或发信的接口会返回 `503 SERVICE_NOT_CONFIGURED`，不会模拟成功。测试提供的替代服务只能通过测试代码注入，运行服务器没有 HTTP/环境变量开关来接受伪造生体判定。
 
@@ -29,15 +29,36 @@ AWS 资源尚未配置时，普通数据与文面接口可以调用；需要识�
 
 详细合同参阅 [用户端接口文档](docs/USER_API.md)；机器可读合同为 [OpenAPI](docs/openapi.json)。修改请求格式后运行 `npm run docs:generate` 更新导入文件，在线 `/openapi.json` 始终从当前定义生成。
 
-所有业务接口使用 `X-Terminal-Id` 和 `X-Terminal-Token` 认证。识别成功后返回短期 `user_token`，后续本人操作使用 `Authorization: Bearer ...`，服务端校验所属终端、用户状态、用途、本人确认和超时。POST、PATCH、PUT、DELETE 必须提供 `Idempotency-Key`；邮件回调除外。
+最终流程及可复制请求见 [前端调用交接](docs/FRONTEND_FACE_HANDOFF.md)。主机联调地址为 `http://192.168.0.51:3002`，当前工作树的 Node API 使用 3002；上面的 Docker 启动端口依实际配置。新版登记使用 capture → 一次 register → verify 自动入队登记通知 → GET mail-results。全部邮件受理后才激活用户。安否使用 identify → 本人确认并获取遮蔽联系人 → safety-notifications → GET mail-results。旧拆分接口保留兼容，OpenAPI 已标记弃用。
+
+公开的 GET /v1/consent-policies 无需终端认证，其他业务接口使用 `X-Terminal-Id` 和 `X-Terminal-Token` 认证。识别成功后返回短期 `user_token`，后续本人操作使用 `Authorization: Bearer ...`，服务端校验所属终端、用户状态、用途、本人确认和超时。POST、PATCH、PUT、DELETE 必须提供 `Idempotency-Key`；邮件回调除外。
 
 发送接口返回 `202 queued`，前端轮询发送结果。`queued`/`sending` 不是成功；`accepted` 才表示服务商已接受。`unknown` 表示外部请求可能已成功，需要回调或工作人员核对，不能自动重发。
 
-初次登记确认、姓名确认、实时生体检测、服务端阈值、同意版本及联系人有效状态均在后端检查。姓名、联系人姓名、邮箱和 Rekognition 引用使用认证加密保存；同意前的数据只进入加密的临时 Redis，最长 15 分钟，90 秒无操作失效。临时 Redis 使用单独本地 AES 密钥，生产配置从 Secrets Manager 读取。
+初次登记验证、本人确认、服务端阈值、同意版本及联系人有效状态均在后端检查。当前图片流程不进行活体检测，返回 liveness_passed=false；可选活体旧接口另行保留。姓名、联系人姓名、邮箱和 Rekognition 引用使用认证加密保存；正式登记前的数据只进入加密的临时内存，最长 15 分钟，90 秒无操作失效。临时内存使用单独本地 AES 密钥，生产配置从 Secrets Manager 读取。
 
-Rekognition 不导出原始特征向量；数据库 `face_templates.template_format='provider_reference'` 时保存加密的 Collection/FaceId 引用，真正的特征由 AWS Collection 管理。原图不写入 PostgreSQL 或 S3。用户暂停、注销或脸部模板删除会生成外部特征清理任务，后台定期重试；登记云调用与数据库提交间的异常由短期租约及 Collection 对账处理。Collection 应专用于本应用。
+Rekognition 不导出原始特征向量；数据库 `face_templates.encrypted_template` 保存加密的 Collection/FaceId 引用，真正的特征由 AWS Collection 管理。原图不写入 PostgreSQL 或 S3。用户暂停或注销会将模板标记 revoked；邮件工作进程在现有 face_templates 表中读取待清理引用，清除 AWS 特征后标记 deleted。取消或失败的登记尝试立即清理云端引用，不再使用独立清理队列和租约。Collection 应专用于本应用。
 
 ## AWS 接入信息
+
+本机配置 `AWS_PROFILE`、`AWS_REGION`、`AWS_REKOGNITION_REGION` 和
+`AWS_REKOGNITION_COLLECTION_ID` 后，在 `backend` 目录执行：
+
+```powershell
+# 只读查询 Collection，验证后端 SDK 凭据和连接
+npm run check:rekognition
+# 创建一个真实活体会话，经终端认证、API 路由及进程内存，并验证幂等重试
+npm run check:rekognition:liveness
+```
+
+第二项需要 `npm run provision:dev` 生成的本地终端凭据，并访问 PostgreSQL。
+它通过 Fastify 的请求注入执行现有接口，不要求先监听 HTTP 端口；不会拍摄、
+注册人脸或发送邮件。一次 AWS 会话会自然过期，终端凭据和会话 ID 不打印。
+通过该检查只表示会话创建成功，摄像头挑战和活体结果仍需前端联调。
+
+主机运行 `npm start` 可读取本机 AWS Profile。已有 Docker API 占用 3001 时，
+当前工作树可使用 `API_PORT=3002`；专门验证人脸接口时设置
+`MAIL_WORKER_ENABLED=false`，关闭该进程的邮件和人脸维护任务。
 
 需要创建或提供以下信息，具体步骤见 [AWS 配置清单](docs/AWS_SETUP.md)：
 
@@ -55,7 +76,7 @@ Access Key/Secret Key 不需要发送到聊天。SDK 使用默认凭据链读取
 # backend 目录：密码学、输入规则、SNS 签名及 AWS 适配层单元测试
 npm test
 
-# 项目根目录：自动创建、迁移、删除独立测试库；使用真实 PostgreSQL/Redis
+# 项目根目录：自动创建、迁移、删除独立测试库；使用真实 PostgreSQL
 .\scripts\test-backend-integration.ps1
 ```
 
@@ -65,4 +86,6 @@ npm test
 
 ## 当前范围
 
-本次完成用户端 API、邮件队列消费、AWS 适配、数据库迁移与接口文档。现有 React 页面仍是展示用模拟流程，接入时按接口文档替换 `runProcessing()` 并接入 Face Liveness 专用组件。管理端 API、正式认证服务、部署至 AWS、个人数据保留期限的定期物理删除、备份轮转和生产同意文面审批不属于本次用户接口实现。
+本次完成用户端 API、邮件队列消费、AWS 适配、数据库迁移与接口文档。本地 React 主页面及 `/dev/face` 已接入图片登记和识别，邮件界面尚未完成正式联调。管理端 API、正式认证服务、部署至 AWS、个人数据保留期限的定期物理删除、备份轮转和生产同意文面审批不属于本次用户接口实现。
+
+数据库按式样书第 10.1 节收敛为 8 张业务表，见 [数据库说明](../database/README.md)。同意文面及版本存放在 `config/consent-policies.json`。无需安装 Redis 或配置 Redis 密码。

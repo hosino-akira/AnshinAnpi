@@ -84,10 +84,8 @@ export function createWebhookHandler(deps) {
       const check = metadata.check_id && (await db.query('SELECT * FROM safety_checks WHERE check_id=$1 FOR UPDATE', [metadata.check_id])).rows[0];
       const delivery = (await db.query('SELECT * FROM mail_deliveries WHERE delivery_id=$1 FOR UPDATE', [deliveryId])).rows[0];
       if (delivery.provider_message_id && delivery.provider_message_id !== messageId) fail(409, 'WEBHOOK_MESSAGE_MISMATCH', 'Invalid notification');
-      const inserted = await db.query(`INSERT INTO mail_delivery_events(delivery_id,provider,provider_event_id,provider_message_id,event_type,occurred_at)
-        VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(provider,provider_event_id) DO NOTHING RETURNING event_id`,
-        [deliveryId, deps.mail.name, notification.MessageId, messageId, type, occurredAt]);
-      if (!inserted.rowCount) return;
+      const replayKey = deps.store.key('webhook',`${deps.mail.name}:${notification.MessageId}`);
+      if (await deps.store.state.exists(replayKey)) return;
       let next = delivery.status;
       if (type === 'bounced' || type === 'complained') next = 'bounced';
       else if (type === 'delivered' && delivery.status !== 'bounced') next = 'delivered';
@@ -99,13 +97,13 @@ export function createWebhookHandler(deps) {
         bounced_at=CASE WHEN $2::varchar='bounced' THEN COALESCE(bounced_at,$5) ELSE bounced_at END,
         error_code=CASE WHEN $2::varchar='bounced' THEN 'MAIL-001' WHEN $2::varchar='failed' THEN 'MAIL-001' ELSE NULL END,
         next_attempt_at=NULL WHERE delivery_id=$1`, [deliveryId, next, messageId, ['accepted','delivered','bounced'].includes(next), occurredAt]);
-      if (next === 'bounced' && delivery.recipient_id) await db.query(`UPDATE recipients SET status='needs_correction',last_bounced_at=$2,bounce_count=bounce_count+1
+      if (next === 'bounced' && delivery.status !== 'bounced' && delivery.recipient_id) await db.query(`UPDATE recipients SET status='needs_correction',last_bounced_at=$2,bounce_count=bounce_count+1
         WHERE recipient_id=$1 AND status <> 'deleted'`, [delivery.recipient_id, occurredAt]);
-      await db.query('UPDATE mail_delivery_events SET processed_at=clock_timestamp() WHERE event_id=$1', [inserted.rows[0].event_id]);
       await updateCheck(db, metadata.check_id);
       if (check) await audit(db, deps.config, { id: request.id ?? randomUUID(), terminal: { terminal_id: check.terminal_id } },
         `mail.webhook.${type}`, 'delivery', deliveryId);
     });
+    await deps.store.state.set(deps.store.key('webhook',`${deps.mail.name}:${notification.MessageId}`),'1',{EX:86400});
     return reply.code(204).send();
   };
 }

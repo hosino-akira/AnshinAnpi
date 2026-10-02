@@ -1,78 +1,51 @@
-# 本番API接続ガイド
+# 前端 API 接入指南（最终版）
 
-この資料は、現在の画面確認用疑似処理を本番APIへ置き換える際の実装ポイントです。パス名は例であり、既存基盤に合わせて変更してください。
+完整参数、JSON 响应及同事局域网代理配置见 [前端交接文档](../../backend/docs/FRONTEND_FACE_HANDOFF.md)。
+后端合同见 [用户端接口](../../backend/docs/USER_API.md)，导入文件为 [OpenAPI](../../backend/docs/openapi.json)。
 
-Node.js実装の実際のパス・リクエスト形式は[利用者API合同](../../backend/docs/USER_API.md)を正としてください。以下の旧対応表は画面整理時の例です。APIは`http://localhost:3001`で動作し、端末認証ヘッダー、短期ユーザートークン、書込時のIdempotency-Keyを使用します。顔確認はAWS Face LivenessセッションIDを送信し、メール送信は202応答後に結果APIをポーリングします。
+开发机后端：`http://192.168.0.51:3002`。本机前端：`http://localhost:5173/`，上传图片测试页：`http://localhost:5173/dev/face`。
 
-## 推奨API対応表
+## 已接入的画面与接口
 
-| 操作 | 画面 | API例 | 成功時 | 主な失敗分岐 |
-| --- | --- | --- | --- | --- |
-| 初回の顔撮影 | SCR-02 | `POST /v1/enrollments/draft/face` | SCR-03 | 品質不足、生体判定失敗、カメラ障害 |
-| 氏名登録 | SCR-03 | `PATCH /v1/enrollments/{id}/profile` | SCR-04 | 文字数超過、禁止文字 |
-| 同意記録 | SCR-04 | `POST /v1/enrollments/{id}/consents` | SCR-05 | 文面版数不一致、保存失敗 |
-| 連絡先登録 | SCR-05 | `PUT /v1/enrollments/{id}/recipients` | SCR-06 | 形式不正、重複、上限超過 |
-| 登録確定 | SCR-06 | `POST /v1/enrollments/{id}/complete` | SCR-07 | 重複登録、保存失敗 |
-| 顔登録の確認 | SCR-07 | `POST /v1/face/verifications` | SCR-08 | 不一致、品質不足、該当なし |
-| 確認メール送信 | SCR-08 | `POST /v1/enrollments/{id}/confirmation-mails` | SCR-09 | 宛先別の部分失敗、配信基盤障害 |
-| 登録者の特定 | SCR-10 | `POST /v1/face/identifications` | SCR-11 | 該当なし、複数候補、品質不足 |
-| 登録済み宛先取得 | SCR-12 | `GET /v1/users/{id}/recipients` | SCR-12表示更新 | 登録なし、権限不正 |
-| 安否メール送信 | SCR-13 | `POST /v1/safety-checks` | SCR-14 | 宛先別の部分失敗、重複、タイムアウト |
-| 送信結果取得 | SCR-14 | `GET /v1/safety-checks/{id}` | 結果更新 | 状態取得失敗 |
+| 画面 | 操作 | 后端接口 |
+| --- | --- | --- |
+| SCR-02 | 拍照、质量检查、取得临时 ID | POST /v1/registrations/capture |
+| SCR-03/04/05 | 页面内填写姓名、展示同意正文、联系人 | GET /v1/consent-policies?type=registration；字段暂存页面内存 |
+| SCR-06 | 确定登记时一次提交所有资料 | POST /v1/registrations |
+| SCR-07 | 再拍照，验证通过自动入队登记通知 | POST /v1/registrations/verify |
+| SCR-08 | 只查询邮件受理结果 | GET /v1/mail-results/{check_id} |
+| SCR-09 | 全部登记邮件受理后显示登记完成 | registration_completed=true、user_status=active |
+| SCR-10 | 拍照识别已激活用户 | POST /v1/faces/identify |
+| SCR-11 | 点击“是”取得联系人；“不是”撤销会话 | POST /v1/users/{user_id}/recipients，confirmed=true/false |
+| SCR-12 | 展示实际联系人及 masked_email | 安否本人确认接口返回的 recipients |
+| SCR-13 | 展示发送同意正文并发送 | POST /v1/safety-notifications |
+| SCR-14 | 查询实际发送结果 | GET /v1/mail-results/{check_id} |
 
-## 置換するコード
+首页已去掉邮件模拟计时成功、演示姓名和演示联系人，状态以实际返回为准。邮件处理中不会显示已完成；可点击“メール結果を確認する”查询，不会重复发信。评分显示每次后端返回的相似度及照片质量。测试页提供文件上传、二次验证、安否联系人确认/同意发送和结果查询。
 
-`app/page.tsx` の `runProcessing()` は一定時間後に次画面へ進むだけの疑似処理です。実装時は、次のような責務を持つAPIクライアントへ置き換えます。
+## 可复用代码
 
-```ts
-// 実装例：実際のAPI仕様に合わせて型とURLを調整してください。
-async function sendSafetyCheck(payload: {
-  userId: string;
-  consentVersion: string;
-  idempotencyKey: string;
-}) {
-  const response = await fetch("/api/v1/safety-checks", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Idempotency-Key": payload.idempotencyKey,
-    },
-    body: JSON.stringify(payload),
-    cache: "no-store",
-  });
+- `lib/face-api.ts`：fetch、JSON、用户令牌、固定防重复请求编号和错误处理。
+- `lib/face-client.ts`：captureRegistration、registrationPolicy、register、verifyAndNotify、identify、confirmRecipients、notifySafety、mailResult、cancelRegistration、endSession。
+- `app/page.tsx`：摄像头 canvas 截图、登记/安否画面连接。
+- `app/dev/face/page.tsx`：上传文件压缩和接口联调。
+- `build/local-terminal-proxy.mjs` 与 `vite.config.ts`：本机 Vite 服务端终端代理。
 
-  if (!response.ok) throw new Error("安否確認メールの送信に失敗しました");
-  return response.json();
-}
+本机 `.env.local`：
+
+```dotenv
+ANSHIN_DEV_FACE_ENABLED=true
+ANSHIN_BACKEND_URL=http://127.0.0.1:3002
 ```
 
-## 顔データの扱い
+该代理读取 `backend/.local-terminal.json`，在服务器添加 X-Terminal-Id/X-Terminal-Token；浏览器请求 `/api/terminal/...`。它限制为本机回环后端和本机同源请求，不能用它访问另一台电脑的后端。**同事另一台电脑的代理配置请使用交接文档中的 Vite proxy 示例**，target 指向 192.168.0.51:3002。不要让同事跨域调用开发机 5173 的代理，也不要把终端凭据放进 VITE 变量。生产构建不启用这个开发代理或测试页，需生产 BFF。
 
-- 顔画像を永続保存するかは、法務・セキュリティ・委託先要件を踏まえて決定します。
-- 保存しない設計では、端末上のフレームから特徴量を生成後、画像バッファを直ちに破棄します。
-- 特徴量は通信時・保存時とも暗号化し、利用目的外の検索を禁止します。
-- 照合閾値を画面側へ持たせず、サーバーまたは認証基盤で管理します。
-- 「該当なし」「複数候補」「品質不足」「生体判定失敗」を同一の成功扱いにしません。
+所有写操作支持显式传入 Idempotency-Key：一次操作固定键；网络失败重试保留相同请求正文、照片与原令牌。不要重试整条注册流程。注册④成功返回的新令牌用于后续查询；原请求重试仍用原登记令牌。用户会话最多 3 分钟，90 秒无操作失效，结束时清除页面个人信息。
 
-## メール送信の扱い
+## 验证和环境限制
 
-- 1回の操作につき一意な冪等キーを発行し、連打や再試行による二重送信を防ぎます。
-- APIは宛先ごとの `accepted` / `failed` / `pending` を返し、SCR-08・SCR-14へ反映します。
-- 「送信受付」と「受信箱への到着」は区別して表示します。
-- ログへ氏名、メール本文、完全なメールアドレスを出力しません。
+运行 `npx tsc --noEmit`、`npm run test:liveness`、`npx vite build`。代理测试使用测试凭据，不发送真实邮件或人脸。
 
-## 同意・監査
+照片为 JPEG/PNG 纯 Base64，解码后最大 512 KiB；摄像头/测试页缩小到最长边 1024 后压缩。图片模式不检测活体，不需 Cognito。没有候选的评分为 null；HTTP 200 还需检查 matched/result，不能直接当识别成功。
 
-- 同意日時、同意文面の版数、端末ID、処理IDをサーバー側へ記録します。
-- 生の顔画像や完全なメールアドレスを監査ログへ含めません。
-- 中止、タイムアウト、照合失敗も個人情報を含まないイベントとして記録します。
-
-## 通信エラーの画面設計
-
-本番実装では、疑似処理オーバーレイを次の状態へ拡張してください。
-
-1. 処理中：ボタンを無効化し、二重実行を防止
-2. 成功：API結果を状態へ保存して次画面へ遷移
-3. 再試行可能：通信障害として「もう一度試す」を表示
-4. 再試行不可：入力内容を保持せず、スタッフ案内またはホームへ戻す
-5. 部分失敗：宛先ごとの結果を表示し、未送信先だけ再送できるようにする
+此前检查的旧地区 us-east-1 中 Collection 不存在，SES 未配置且工作进程关闭。现使用东京 ap-northeast-1，真实完整测试应以主目录当前 AWS 配置重新验证人脸与邮件资源；旧地区结果不代表东京资源状态。数据库和公开文面接口可先联调，接口不会模拟 AWS/邮件成功。

@@ -1,7 +1,6 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { createClient } from 'redis';
 import { loadLocalEnv, readConfig } from '../../src/config.js';
 import { createPool } from '../../src/db.js';
 import { LocalCipher, token, sha256 } from '../../src/crypto.js';
@@ -12,7 +11,7 @@ import { MailFailure } from '../../src/providers/aws-mail.js';
 import { auditDigest } from '../../src/audit.js';
 
 if (!/^anshin_api_test_[a-zA-Z0-9_]+$/.test(process.env.TEST_DATABASE_NAME ?? '')) throw new Error('TEST_DATABASE_NAME must name an isolated anshin_api_test_* database');
-let app, pool, redis, config, store, worker, terminal, otherTerminal, face, mail;
+let app, pool, config, store, worker, terminal, otherTerminal, face, mail;
 const credentials = token(); const otherCredentials = token();
 let identity = 'person-a';
 const observedErrors = [];
@@ -21,15 +20,12 @@ before(async () => {
   loadLocalEnv(); config = await readConfig();
   config.postgres = { ...config.postgres, database: process.env.TEST_DATABASE_NAME };
   delete config.postgres.connectionString;
-  config.redisPrefix = `anshin-test:${randomUUID()}:`;
   pool = createPool(config);
-  redis = createClient({ url: config.redisUrl }); redis.on('error', () => {}); await redis.connect();
-  store = new TemporaryStore(redis, config);
-  const facility = (await pool.query(`INSERT INTO facilities(facility_code,name) VALUES($1,'Test facility') RETURNING facility_id`, [randomUUID()])).rows[0];
+  store = new TemporaryStore(config);
+  const facility = { facility_id:randomUUID() };
   terminal = (await pool.query(`INSERT INTO terminals(facility_id,terminal_code,name,status,credential_fingerprint) VALUES($1,$2,'Test terminal','active',$3) RETURNING *`, [facility.facility_id, randomUUID(), sha256(credentials).toString('hex')])).rows[0];
   otherTerminal = (await pool.query(`INSERT INTO terminals(facility_id,terminal_code,name,status,credential_fingerprint) VALUES($1,$2,'Other terminal','active',$3) RETURNING *`, [facility.facility_id, randomUUID(), sha256(otherCredentials).toString('hex')])).rows[0];
-  for (const type of ['registration','safety']) await pool.query(`INSERT INTO consent_policies(policy_version,consent_type,title,body,content_sha256,status,published_at)
-    VALUES('test-v1',$1,'Test','Test policy',$2,'published',clock_timestamp())`, [type, sha256('Test policy')]);
+  const policies = ['registration','safety'].map(consent_type => ({consent_type,policy_version:'test-v1',title:'Test',body:'Test policy',status:'published',requires_reconsent:false}));
   face = {
     name: 'test-face', ready: true, references: new Map(), sessions: new Map(), override: null, indexCalls: 0, failCapture: false,
     requireReady() { if (!this.ready) { const e = new Error('unavailable'); e.status=503; e.code='SERVICE_NOT_CONFIGURED'; throw e; } },
@@ -37,6 +33,10 @@ before(async () => {
     async capture(id) {
       if (this.failCapture) { const { ApiError } = await import('../../src/errors.js'); throw new ApiError(422,'FACE-004','Liveness rejected'); }
       return { image: Buffer.from(this.sessions.get(id)), qualityPassed: true, livenessPassed: true };
+    },
+    async captureImage() {
+      return { image: Buffer.from(identity), qualityPassed: true, livenessPassed: false,
+        metrics: { face_confidence: 99.8, brightness: 60, sharpness: 85 } };
     },
     async index(image, userId) { this.indexCalls++; const ref = { faceId: randomUUID(), collectionId: 'test', modelVersion: 'test-v1', provider: this.name };
       this.references.set(userId, { ...ref, identity: image.toString() }); return ref; },
@@ -46,7 +46,7 @@ before(async () => {
   mail = { name: 'test-mail', ready: true, sends: [], outcomes: [], async send(message) {
     this.sends.push(message); const outcome = this.outcomes.shift(); if (outcome) throw outcome; return { messageId: randomUUID() };
   } };
-  const deps = { pool, config, redis, store, face, mail, cipher: new LocalCipher(config.encryptionKey), logger: false,
+  const deps = { pool, config, store, face, mail, policies, cipher: new LocalCipher(config.encryptionKey), logger: false,
     webhookVerifier: async () => {} }; // Test injection only; server runtime always verifies real SNS signatures.
   app = await createApp(deps);
   app.addHook('onError', (request, reply, error, done) => { observedErrors.push({ code:error.code, message:error.message, constraint:error.constraint }); done(); });
@@ -54,7 +54,7 @@ before(async () => {
 });
 after(async () => {
   if (app) await app.close();
-  if (redis) { const keys = []; for await (const batch of redis.scanIterator({ MATCH: `${config.redisPrefix}*`, COUNT: 100 })) keys.push(...batch); if (keys.length) await redis.del(keys); await redis.quit(); }
+  store?.close();
   if (pool) await pool.end();
 });
 
@@ -102,6 +102,20 @@ async function identify(label) {
 }
 let personA, personB;
 
+test('published policies are public while private operations remain authenticated', async () => {
+  for (const type of ['registration','safety']) {
+    const response=await app.inject({method:'GET',url:`/v1/consent-policies?type=${type}`,headers:{origin:'http://frontend.example:5174'}});
+    assert.equal(response.statusCode,200);
+    assert.equal(response.json().policy_version,'test-v1');
+    assert.equal(response.json().body,'Test policy');
+    assert.equal(response.headers['access-control-allow-origin'],'*');
+    assert.equal(response.headers['cache-control'],'no-store');
+  }
+  assert.equal((await app.inject({method:'GET',url:'/v1/consent-policies?type=invalid'})).statusCode,400);
+  assert.equal((await app.inject({method:'POST',url:'/v1/enrollments',payload:{}})).statusCode,401);
+  assert.equal((await app.inject({method:'POST',url:'/v1/faces/identify',payload:{image_base64:'aQ=='}})).statusCode,401);
+});
+
 test('terminal authentication, policy and service-not-configured behavior', async () => {
   assert.equal((await app.inject({ method:'GET',url:'/v1/terminal' })).statusCode,401);
   assert.equal((await request('GET','/v1/terminal',undefined,null,{ 'x-terminal-token': token() })).status,401);
@@ -116,7 +130,7 @@ test('pre-consent fields live only in encrypted temporary storage; denial erases
   const draft = await success('POST','/v1/enrollments',{});
   await success('PATCH',`/v1/enrollments/${draft.temp_id}/profile`,{ display_name:'一時利用者' });
   await success('POST',`/v1/enrollments/${draft.temp_id}/face`,{ liveness_session_id:await liveness('enrollment',draft.temp_id) });
-  const raw = await redis.get(store.key('draft',draft.temp_id));
+  const raw = await store.state.get(store.key('draft',draft.temp_id));
   assert.ok(!raw.includes('一時利用者') && !raw.includes('denied-person'));
   await success('POST',`/v1/enrollments/${draft.temp_id}/consent`,{ policy_version:'test-v1',result:'denied' });
   assert.equal(await store.get('draft',draft.temp_id),null);
@@ -126,7 +140,7 @@ test('pre-consent fields live only in encrypted temporary storage; denial erases
 test('registration with two contacts persists encrypted data and activates after mail acceptance', async () => {
   personA=await enroll('person-a',[{ name:'家族1',email:'family-one@example.com' },{ name:'家族2',email:'family-two@example.com' }]);
   const user=(await pool.query('SELECT * FROM users WHERE user_id=$1',[personA.userId])).rows[0];
-  assert.equal(user.status,'active'); assert.ok(!user.encrypted_display_name.includes(Buffer.from('利用者')));
+  assert.equal(user.status,'active'); assert.ok(!user.display_name.includes(Buffer.from('利用者')));
   assert.equal((await pool.query('SELECT count(*) AS n FROM recipients WHERE user_id=$1',[personA.userId])).rows[0].n,'2');
   assert.deepEqual(mail.sends.map(x=>x.email),['family-one@example.com','family-two@example.com']);
   const recipients=await success('GET','/v1/users/me/recipients',undefined,personA.token);
@@ -157,7 +171,10 @@ test('a token from another user or terminal cannot read a send result', async ()
 });
 test('expired and idle sessions do not reveal personal information', async () => {
   const raw=await identify('person-a'); await success('POST','/v1/users/me/confirmation',{ confirmed:true },raw);
-  await pool.query(`UPDATE api_sessions SET last_activity_at=clock_timestamp()-interval '91 seconds' WHERE token_sha256=$1`,[sha256(raw)]);
+  const sessionHash=sha256(raw).toString('hex');
+  const session=await store.get('session',sessionHash);
+  session.last_activity_at=new Date(Date.now()-91000).toISOString();
+  await store.put('session',sessionHash,session,session.expires_at);
   assert.equal((await request('GET','/v1/users/me/recipients',undefined,raw)).status,401);
 });
 test('ambiguous and absent recognition results return no names or user token', async () => {
@@ -201,21 +218,44 @@ test('unknown SES outcome is never automatically resent and signed callbacks rec
   assert.equal((await app.inject({ method:'POST',url:'/v1/mail/webhooks',payload:notification })).statusCode,204);
   const final=await success('GET',`/v1/safety-checks/${check.check_id}`,undefined,raw);
   assert.equal(final.recipient_results[0].status,'delivered');
-  assert.equal((await pool.query('SELECT count(*) AS n FROM mail_delivery_events WHERE provider_event_id=$1',[notification.MessageId])).rows[0].n,'1');
+  assert.equal(await store.state.get(store.key('webhook',`test-mail:${notification.MessageId}`)),'1');
 });
 test('expired send requests are cancelled before contacting SES', async () => {
   const raw=await identify('person-b'); await success('POST','/v1/users/me/confirmation',{ confirmed:true },raw);
   const check=await success('POST','/v1/safety-checks',{ policy_version:'test-v1',consent:true },raw);
-  await pool.query(`UPDATE safety_checks SET expires_at=created_at+interval '1 millisecond' WHERE check_id=$1`,[check.check_id]);
+  await pool.query(`UPDATE safety_checks SET expires_at=clock_timestamp()-interval '1 second' WHERE check_id=$1`,[check.check_id]);
   const count=mail.sends.length;await worker.tick();assert.equal(mail.sends.length,count);
   assert.equal((await success('GET',`/v1/safety-checks/${check.check_id}`,undefined,raw)).status,'cancelled');
 });
 test('suspension revokes sessions and queues deletion of managed face features', async () => {
   await pool.query(`UPDATE users SET status='suspended',suspended_at=clock_timestamp(),purge_after=clock_timestamp()+interval '30 days' WHERE user_id=$1`,[personB.userId]);
   assert.equal((await request('GET','/v1/users/me/recipients',undefined,personB.token)).status,401);
-  assert.equal((await pool.query('SELECT count(*) AS n FROM face_cleanup_jobs')).rows[0].n,'1');
+  assert.equal((await pool.query("SELECT count(*) AS n FROM face_templates WHERE status='revoked'")).rows[0].n,'1');
   await worker.cleanFaces();assert.equal(face.references.has(personB.userId),false);
 });
+test('photo enrollment and verification return similarity without claiming liveness', async () => {
+  identity = 'photo-person'; face.override = null;
+  const payload = { image_base64: Buffer.from([255,216,255,224]).toString('base64') };
+  const draft = await success('POST','/v1/enrollments',{});
+  await success('PATCH',`/v1/enrollments/${draft.temp_id}/profile`,{ display_name:'Photo person' });
+  assert.equal((await request('POST',`/v1/enrollments/${draft.temp_id}/face`,payload)).status,409);
+  await success('POST',`/v1/enrollments/${draft.temp_id}/consent`,{ policy_version:'test-v1',result:'granted' });
+  await success('PUT',`/v1/enrollments/${draft.temp_id}/recipients`,{ recipients:[{name:'Contact',email:'photo@example.com'}] });
+  const checked=await success('POST',`/v1/enrollments/${draft.temp_id}/face`,payload);
+  assert.equal(checked.metrics.liveness_passed,false);
+  const completed=await success('POST',`/v1/enrollments/${draft.temp_id}/complete`,{});
+  const verified=await success('POST','/v1/faces/verify-registration',payload,completed.user_token);
+  assert.equal(verified.result,'matched');
+  assert.equal(verified.metrics.similarity_score,99.9);
+  assert.equal(verified.metrics.liveness_passed,false);
+  const stored=await store.get('session',sha256(verified.user_token).toString('hex'));
+  assert.equal(stored.authentication_method,'image');
+  assert.equal(stored.liveness_passed,false);
+  const notActive=await success('POST','/v1/faces/identify',payload);
+  assert.equal(notActive.result,'no_match');
+  assert.equal(notActive.metrics.similarity_score,null);
+});
+
 test('actual audit entries have a valid HMAC chain and contain only opaque identifiers', async () => {
   const rows=(await pool.query('SELECT * FROM audit_logs ORDER BY log_id')).rows;
   let previous=null;
@@ -226,4 +266,158 @@ test('actual audit entries have a valid HMAC chain and contain only opaque ident
     previous=row.entry_hmac;
   }
   assert.ok(rows.length>10);
+});
+
+
+test('public schema has exactly the eight specification tables and field names', async () => {
+  const tables=(await pool.query("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")).rows.map(r=>r.tablename);
+  assert.deepEqual(tables,['audit_logs','consents','face_templates','mail_deliveries','recipients','safety_checks','terminals','users']);
+  const columns=(await pool.query("SELECT table_name,column_name FROM information_schema.columns WHERE table_schema='public' AND table_name IN ('users','recipients')")).rows;
+  assert.ok(columns.some(r=>r.table_name==='users'&&r.column_name==='display_name'));
+  assert.ok(columns.some(r=>r.table_name==='recipients'&&r.column_name==='name'));
+  assert.ok(!columns.some(r=>['encrypted_display_name','encrypted_name','display_name_lookup_hmac','email_lookup_hmac'].includes(r.column_name)));
+});
+
+test('mail duplicate prevention survives process memory loss', async () => {
+  const raw=await identify('person-a'); await success('POST','/v1/users/me/confirmation',{confirmed:true},raw);
+  const key=randomUUID(); const body={policy_version:'test-v1',consent:true};
+  const first=await success('POST','/v1/safety-checks',body,raw,{'idempotency-key':key});
+  store.close(); // Simulates a complete process restart, including session loss.
+  const replay=await success('POST','/v1/safety-checks',body,raw,{'idempotency-key':key});
+  assert.equal(replay.check_id,first.check_id);
+  assert.equal((await pool.query('SELECT count(*) AS n FROM mail_deliveries WHERE check_id=$1',[first.check_id])).rows[0].n,'2');
+  await worker.tick();
+});
+
+
+const photoPayload={image_base64:Buffer.from([255,216,255,224]).toString('base64')};
+let finalUser;
+async function captureAndRegister(label,contacts=[{name:'Contact',email:`${label}@example.com`}]) {
+  identity=label;
+  const captured=await success('POST','/v1/registrations/capture',photoPayload);
+  assert.equal(captured.face_valid,true);
+  const body={temp_id:captured.temp_id,display_name:`Final ${label}`,recipients:contacts,policy_version:'test-v1',consent_result:'granted'};
+  const key=randomUUID();
+  const registered=await success('POST','/v1/registrations',body,null,{'idempotency-key':key});
+  const repeated=await success('POST','/v1/registrations',body,null,{'idempotency-key':key});
+  assert.deepEqual(repeated,registered);
+  assert.equal(registered.user_status,'pending_registration');
+  assert.equal(registered.registration_completed,false);
+  assert.equal(await store.get('draft',captured.temp_id),null);
+  return registered;
+}
+
+test('final capture requires no prior consent and neither creates users nor indexes AWS faces',async()=>{
+  identity='final-capture';
+  const beforeUsers=(await pool.query('SELECT count(*) AS n FROM users')).rows[0].n;
+  const beforeIndices=face.indexCalls;
+  const draft=await success('POST','/v1/registrations/capture',photoPayload);
+  assert.equal(draft.face_valid,true);assert.ok(draft.temp_id);
+  assert.equal((await pool.query('SELECT count(*) AS n FROM users')).rows[0].n,beforeUsers);
+  assert.equal(face.indexCalls,beforeIndices);
+  assert.ok((await store.get('draft',draft.temp_id)).image);
+  await success('DELETE',`/v1/registrations/${draft.temp_id}`,{});
+  assert.equal(await store.get('draft',draft.temp_id),null);
+});
+
+test('final consent denial erases the first image and creates no formal user',async()=>{
+  identity='final-denied';const draft=await success('POST','/v1/registrations/capture',photoPayload);
+  const before=face.indexCalls;
+  const result=await success('POST','/v1/registrations',{temp_id:draft.temp_id,display_name:'Denied',recipients:[{name:'Contact',email:'denied@example.com'}],policy_version:'test-v1',consent_result:'denied'});
+  assert.equal(result.success,false);assert.equal(result.user_id,null);assert.equal(face.indexCalls,before);
+  assert.equal(await store.get('draft',draft.temp_id),null);
+});
+
+test('final registration validates policy version before indexing and keeps a failed draft retryable',async()=>{
+  identity='final-stale';const draft=await success('POST','/v1/registrations/capture',photoPayload);const before=face.indexCalls;
+  const result=await request('POST','/v1/registrations',{temp_id:draft.temp_id,display_name:'Stale',recipients:[{name:'Contact',email:'stale@example.com'}],policy_version:'old-v0',consent_result:'granted'});
+  assert.equal(result.status,409);assert.equal(result.body.error.code,'POLICY_VERSION_CHANGED');assert.equal(face.indexCalls,before);
+  assert.ok(await store.get('draft',draft.temp_id));await success('DELETE',`/v1/registrations/${draft.temp_id}`,{});
+});
+
+test('final second verification automatically queues one registration notification and returns its result ID',async()=>{
+  const registered=await captureAndRegister('final-one',[{name:'One',email:'final-one@example.com'},{name:'Two',email:'final-two@example.com'}]);
+  assert.equal((await request('POST','/v1/registrations/verify',{...photoPayload,user_id:randomUUID()},registered.user_token)).status,403);
+  identity='person-a';
+  const anotherActiveUser=await success('POST','/v1/registrations/verify',{...photoPayload,user_id:registered.user_id},registered.user_token);
+  assert.equal(anotherActiveUser.matched,false);assert.equal(anotherActiveUser.user_token,undefined);
+  identity='other-person';
+  const missing=await success('POST','/v1/registrations/verify',{...photoPayload,user_id:registered.user_id},registered.user_token);
+  assert.equal(missing.matched,false);assert.equal(missing.check_id,undefined);
+  assert.equal((await pool.query('SELECT count(*) AS n FROM safety_checks WHERE user_id=$1',[registered.user_id])).rows[0].n,'0');
+  identity='final-one';const key=randomUUID();const body={...photoPayload,user_id:registered.user_id};
+  const [first,repeat]=await Promise.all([request('POST','/v1/registrations/verify',body,registered.user_token,{'idempotency-key':key}),request('POST','/v1/registrations/verify',body,registered.user_token,{'idempotency-key':key})]);
+  assert.equal(first.status,200);assert.deepEqual(first.body,repeat.body);
+  assert.equal(first.body.matched,true);assert.equal(first.body.verification_status,'verified');assert.equal(first.body.mail_status,'queued');
+  assert.equal(first.body.user_status,'pending_registration');assert.equal(first.body.similarity_score,99.9);
+  const before=mail.sends.length;
+  const pending=await success('GET',`/v1/mail-results/${first.body.check_id}`,undefined,first.body.user_token);
+  assert.equal(pending.registration_completed,false);assert.equal(mail.sends.length,before);
+  await worker.tick();
+  const done=await success('GET',`/v1/mail-results/${first.body.check_id}`,undefined,first.body.user_token);
+  assert.equal(done.registration_completed,true);assert.equal(done.user_status,'active');assert.equal(done.mail_status,'accepted');
+  assert.deepEqual(mail.sends.slice(before).map(m=>m.type),['registration','registration']);
+  finalUser={...registered,verificationBody:body,originalToken:registered.user_token,verificationKey:key,verified:first.body};
+});
+
+test('final registration replay after complete memory loss restores a result token without re-sending',async()=>{
+  const before=mail.sends.length;store.close();
+  const replay=await request('POST','/v1/registrations/verify',finalUser.verificationBody,finalUser.originalToken,{'idempotency-key':finalUser.verificationKey});
+  assert.equal(replay.status,200);assert.equal(replay.body.recovered,true);assert.equal(replay.body.check_id,finalUser.verified.check_id);
+  assert.equal(replay.body.metrics.similarity_score,null);assert.ok(replay.body.user_token);
+  const result=await success('GET',`/v1/mail-results/${replay.body.check_id}`,undefined,replay.body.user_token);
+  assert.equal(result.registration_completed,true);await worker.tick();assert.equal(mail.sends.length,before);
+});
+
+test('final safety identification, person confirmation and send use the same user ID and masked contacts',async()=>{
+  identity='final-one';const identified=await success('POST','/v1/faces/identify',photoPayload);
+  assert.equal(identified.matched,true);assert.equal(identified.user_id,finalUser.user_id);
+  assert.equal((await request('POST','/v1/safety-notifications',{user_id:identified.user_id,consent:true,policy_version:'test-v1'},identified.user_token)).status,403);
+  assert.equal((await request('POST',`/v1/users/${randomUUID()}/recipients`,{confirmed:true},identified.user_token)).status,403);
+  const contacts=await success('POST',`/v1/users/${identified.user_id}/recipients`,{confirmed:true},identified.user_token);
+  assert.equal(contacts.success,true);assert.equal(contacts.policy_version,'test-v1');assert.equal(contacts.consent_body,'Test policy');
+  assert.equal(JSON.stringify(contacts).includes('final-one@example.com'),false);
+  const key=randomUUID();const body={user_id:identified.user_id,consent:true,policy_version:contacts.policy_version};
+  const sent=await success('POST','/v1/safety-notifications',body,identified.user_token,{'idempotency-key':key});
+  const repeated=await success('POST','/v1/safety-notifications',body,identified.user_token,{'idempotency-key':key});assert.equal(sent.check_id,repeated.check_id);
+  const before=mail.sends.length;await worker.tick();assert.deepEqual(mail.sends.slice(before).map(m=>m.type),['safety','safety']);
+  const result=await success('GET',`/v1/mail-results/${sent.check_id}`,undefined,identified.user_token);assert.equal(result.mail_status,'accepted');
+});
+
+test('final rejection of identity or send consent creates no email event',async()=>{
+  identity='final-one';const person=await success('POST','/v1/faces/identify',photoPayload);
+  const denied=await success('POST',`/v1/users/${person.user_id}/recipients`,{confirmed:false},person.user_token);
+  assert.equal(denied.success,false);assert.deepEqual(denied.recipients,[]);
+  assert.equal((await request('POST',`/v1/users/${person.user_id}/recipients`,{confirmed:true},person.user_token)).status,401);
+  const second=await success('POST','/v1/faces/identify',photoPayload);
+  await success('POST',`/v1/users/${second.user_id}/recipients`,{confirmed:true},second.user_token);
+  const before=(await pool.query('SELECT count(*) AS n FROM safety_checks')).rows[0].n;
+  const notSent=await success('POST','/v1/safety-notifications',{user_id:second.user_id,consent:false,policy_version:'test-v1'},second.user_token);
+  assert.equal(notSent.check_id,null);assert.equal(notSent.mail_status,'cancelled');
+  assert.equal((await pool.query('SELECT count(*) AS n FROM safety_checks')).rows[0].n,before);
+});
+
+test('registration stays pending when any notification recipient fails',async()=>{
+  const user=await captureAndRegister('final-partial',[{name:'A',email:'partial-a@example.com'},{name:'B',email:'partial-b@example.com'}]);
+  const verified=await success('POST','/v1/registrations/verify',{...photoPayload,user_id:user.user_id},user.user_token);
+  mail.outcomes=[null,new MailFailure('MAIL-001')];await worker.tick();
+  const result=await success('GET',`/v1/mail-results/${verified.check_id}`,undefined,verified.user_token);
+  assert.equal(result.mail_status,'partially_accepted');assert.equal(result.registration_completed,false);assert.equal(result.user_status,'pending_registration');
+  assert.deepEqual(result.recipient_results.map(r=>r.status),['accepted','failed']);
+});
+
+test('unconfigured registration mail rolls back verification token rotation and can be retried',async()=>{
+  const user=await captureAndRegister('final-mail-unavailable');
+  const key=randomUUID(), body={...photoPayload,user_id:user.user_id};
+  mail.ready=false;
+  try {
+    const failed=await request('POST','/v1/registrations/verify',body,user.user_token,{'idempotency-key':key});
+    assert.equal(failed.status,503);assert.equal(failed.body.error.code,'SERVICE_NOT_CONFIGURED');
+    assert.equal((await pool.query('SELECT count(*) AS n FROM safety_checks WHERE user_id=$1',[user.user_id])).rows[0].n,'0');
+  } finally { mail.ready=true; }
+  const retried=await success('POST','/v1/registrations/verify',body,user.user_token,{'idempotency-key':key});
+  assert.equal(retried.matched,true);assert.equal(retried.mail_status,'queued');
+  await worker.tick();
+  const result=await success('GET',`/v1/mail-results/${retried.check_id}`,undefined,retried.user_token);
+  assert.equal(result.registration_completed,true);
 });

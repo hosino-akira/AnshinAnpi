@@ -17,6 +17,6 @@ try {
   process.on('SIGINT', () => stop().then(() => process.exit(0)));
   process.on('SIGTERM', () => stop().then(() => process.exit(0)));
 } catch {
-  console.error('API_STARTUP_FAILED: check local environment, PostgreSQL migrations, and Redis availability.');
+  console.error('API_STARTUP_FAILED: check local environment, PostgreSQL migrations, and consent policy configuration.');
   process.exitCode = 1;
 }

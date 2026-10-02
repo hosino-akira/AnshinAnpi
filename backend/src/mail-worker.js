@@ -13,7 +13,7 @@ export async function updateCheck(db, checkId) {
     : accepted === statuses.length && accepted > 0 ? 'accepted' : accepted > 0 ? 'partially_accepted'
       : statuses.every(status => status === 'cancelled') ? 'cancelled' : 'failed';
   await db.query(`UPDATE safety_checks SET status=$2,completed_at=CASE WHEN $3 THEN NULL ELSE clock_timestamp() END WHERE check_id=$1`, [checkId, status, pending]);
-  if (accepted > 0) await db.query(`UPDATE users u SET status='active',registered_at=COALESCE(u.registered_at,clock_timestamp())
+  if (accepted === statuses.length && accepted > 0) await db.query(`UPDATE users u SET status='active',registered_at=COALESCE(u.registered_at,clock_timestamp())
     FROM safety_checks c WHERE c.check_id=$1 AND c.user_id=u.user_id AND c.check_type='registration' AND u.status='pending_registration'`, [checkId]);
 }
 
@@ -52,11 +52,10 @@ export class MailWorker {
         return;
       }
       const request = { id: randomUUID(), terminal };
-      const facility = (await db.query('SELECT timezone FROM facilities WHERE facility_id=$1', [terminal.facility_id])).rows[0];
       try {
         const result = await this.mail.send({ email: await this.cipher.open(delivery.encrypted_email_snapshot, 'recipient-email'),
-          displayName: await this.cipher.open(user.encrypted_display_name, 'user-name'), occurredAt: check.created_at,
-          timezone: facility.timezone, type: check.check_type, deliveryId: id });
+          displayName: await this.cipher.open(user.display_name, 'user-name'), occurredAt: check.created_at,
+          timezone: terminal.timezone, type: check.check_type, deliveryId: id });
         await db.query(`UPDATE mail_deliveries SET status='accepted',provider_message_id=$2,accepted_at=clock_timestamp(),error_code=NULL WHERE delivery_id=$1`, [id, result.messageId]);
         await audit(db, this.config, request, 'mail.accepted', 'delivery', id);
       } catch (error) {
@@ -80,49 +79,16 @@ export class MailWorker {
         WHERE delivery_id=$1 AND status='sending' AND sending_started_at < clock_timestamp()-interval '45 seconds'`, [row.delivery_id]);
       if (updated.rowCount) await updateCheck(db, row.check_id);
     });
-    await this.pool.query('DELETE FROM api_sessions WHERE expires_at < clock_timestamp()-interval \'1 day\'');
-    await this.pool.query('DELETE FROM api_idempotency WHERE expires_at < clock_timestamp()-interval \'1 day\'');
   }
   async cleanFaces() {
     if (!this.face.ready) return;
     await transaction(this.pool, async db => {
-      const row = (await db.query(`SELECT * FROM face_cleanup_jobs WHERE next_attempt_at<=clock_timestamp()
-        AND provider=$1 ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED`, [this.face.name])).rows[0];
+      const row = (await db.query(`SELECT * FROM face_templates WHERE status='revoked' AND provider=$1
+        ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED`, [this.face.name])).rows[0];
       if (!row) return;
-      try {
-        await this.face.delete(await this.cipher.open(row.encrypted_reference, 'face-reference'));
-        await db.query('DELETE FROM face_cleanup_jobs WHERE job_id=$1', [row.job_id]);
-      } catch {
-        await db.query(`UPDATE face_cleanup_jobs SET attempt_count=attempt_count+1,error_code='FACE_CLEANUP_FAILED',
-          next_attempt_at=clock_timestamp()+interval '5 minutes' WHERE job_id=$1`, [row.job_id]);
-      }
+      await this.face.delete(await this.cipher.open(row.encrypted_template, 'face-reference'));
+      await db.query("UPDATE face_templates SET status='deleted' WHERE template_id=$1", [row.template_id]);
     });
-  }
-  async reconcileFaces() {
-    if (!this.face.ready || !this.face.list) return;
-    const templates = (await this.pool.query(`SELECT encrypted_template FROM face_templates t JOIN users u USING(user_id)
-      WHERE t.provider=$1 AND t.status='active' AND u.status IN ('active','pending_registration')`, [this.face.name])).rows;
-    const valid = new Set();
-    for (const row of templates) valid.add((await this.cipher.open(row.encrypted_template, 'face-reference')).faceId);
-    const leased = new Set((await this.pool.query('SELECT user_id FROM face_index_leases WHERE expires_at>clock_timestamp()')).rows.map(row => row.user_id));
-    let next;
-    do {
-      const page = await this.face.list(next);
-      for (const face of page.faces) {
-        // Only manage UUID external IDs created by this application in its dedicated collection.
-        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(face.ExternalImageId ?? '')
-          && !valid.has(face.FaceId) && !leased.has(face.ExternalImageId)) {
-          // Re-read after listing: an enrollment may have committed during pagination.
-          const lease = (await this.pool.query('SELECT 1 FROM face_index_leases WHERE user_id=$1 AND expires_at>clock_timestamp()', [face.ExternalImageId])).rowCount;
-          const current = (await this.pool.query(`SELECT encrypted_template FROM face_templates WHERE user_id=$1 AND status='active' AND provider=$2`, [face.ExternalImageId, this.face.name])).rows;
-          let stillValid = false;
-          for (const row of current) if ((await this.cipher.open(row.encrypted_template, 'face-reference')).faceId === face.FaceId) stillValid = true;
-          if (!lease && !stillValid) await this.face.delete({ collectionId: this.config.collectionId, faceId: face.FaceId });
-        }
-      }
-      next = page.nextToken;
-    } while (next);
-    await this.pool.query('DELETE FROM face_index_leases WHERE expires_at<=clock_timestamp()');
   }
   async tick() {
     if (this.busy) return;
@@ -136,11 +102,10 @@ export class MailWorker {
   }
   start(logger) {
     this.timer = setInterval(() => this.tick().catch(() => logger.error({ errorCode: 'WORKER_FAILED' }, 'worker_failed')), 1000);
-    this.faceTimer = setInterval(() => this.reconcileFaces().catch(() => logger.error({ errorCode: 'FACE_RECONCILE_FAILED' }, 'reconcile_failed')), 300000);
-    this.timer.unref(); this.faceTimer.unref();
+    this.timer.unref();
   }
   async stop() {
-    clearInterval(this.timer); clearInterval(this.faceTimer);
+    clearInterval(this.timer);
     const deadline = Date.now() + 30000;
     while (this.busy && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
   }

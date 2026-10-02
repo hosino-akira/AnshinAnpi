@@ -1,6 +1,14 @@
 # AWS 接入配置清单
 
-目前 AWS 资源尚未创建，后端已经预留 SDK 适配和配置项。完成以下配置后，可进行真实脸部识别与邮件的联调；本次没有调用 AWS 创建资源或发送真实邮件。
+后端已经提供 AWS SDK 适配和配置项。Rekognition、前端活体凭据、SES 和生产加密资源分别配置与验证，某一项通过不代表其他服务已经可用。
+
+此前对旧美国地区的复查：Profile `anshin-dev`、Region `us-east-1` 能调用 AWS，
+但 `anshin-anpi-faces-dev` 的查询返回 `ResourceNotFoundException`（HTTP 400），
+当时该 Collection 不存在。现改用东京 `ap-northeast-1`，应以主目录当前配置重新检查东京资源；旧地区记录不代表东京状态。
+此前测试时 SES 未配置、邮件工作进程关闭；最终登记验证成功后会自动入队登记通知，
+因此完整测试还需配置发件身份和权限、启用邮件工作进程并重启后端。
+只读复核命令为 `npm run check:rekognition`。图片模式不需要前端 Cognito 或活体视频；
+`npm run check:rekognition:liveness` 仅用于保留的可选活体流程。
 
 ## 需要提供的信息
 
@@ -62,7 +70,7 @@ KMS GenerateDataKey 产生数据键，AES-256-GCM 加密内容，数据库只保
 
 ## 原图与配信数据
 
-CreateFaceLivenessSession 使用 `AuditImagesLimit=0`，不设置 S3 OutputConfig，参考图由 GetFaceLivenessSessionResults 以 bytes 返回，仅在内存或加密短期 Redis 中处理，不持久化原图。[AWS 生体会话结果](https://docs.aws.amazon.com/rekognition/latest/APIReference/API_GetFaceLivenessSessionResults.html)。AWS 生体会话自身约 3 分钟失效，[会话有效期](https://docs.aws.amazon.com/rekognition/latest/APIReference/API_CreateFaceLivenessSession.html)。
+CreateFaceLivenessSession 使用 `AuditImagesLimit=0`，不设置 S3 OutputConfig，参考图由 GetFaceLivenessSessionResults 以 bytes 返回，仅在加密短期进程内存 中处理，不持久化原图。[AWS 生体会话结果](https://docs.aws.amazon.com/rekognition/latest/APIReference/API_GetFaceLivenessSessionResults.html)。AWS 生体会话自身约 3 分钟失效，[会话有效期](https://docs.aws.amazon.com/rekognition/latest/APIReference/API_CreateFaceLivenessSession.html)。
 
 SES SDK 的重试设为 1 次调用；应用对明确限流最多重试 2 次，对网络超时等结果未知请求不自动重发。邮件 tag `anshin_delivery_id` 用于把签名通知关联到对应宛先，不放用户姓名、邮箱或脸部数据。SES SendEmail API 没有可供本应用使用的客户端幂等键，[API 结构](https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_SendEmail.html)。
 

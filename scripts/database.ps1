@@ -32,7 +32,7 @@ try {
         'status' {
             Invoke-DatabaseSql @'
 SELECT current_database() AS database, current_setting('TimeZone') AS timezone;
-SELECT version, applied_at FROM schema_migrations ORDER BY version;
+SELECT version, applied_at FROM app_meta.schema_migrations ORDER BY version;
 SELECT relname AS table_name, n_live_tup AS estimated_rows
 FROM pg_stat_user_tables WHERE schemaname = 'public' ORDER BY relname;
 '@

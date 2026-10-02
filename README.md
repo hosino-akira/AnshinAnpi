@@ -40,11 +40,11 @@ docker compose exec postgres psql -U anshin -d anshin -c "SELECT current_databas
 
 ホストPCで動くNode.jsバックエンドの接続先は `postgresql://localhost:5433/anshin`、ユーザー名は `anshin`、パスワードは `.env` の `POSTGRES_PASSWORD` です。ポートやDB名を変更した場合は `.env` の値に合わせてください。バックエンドを同じ Compose ネットワークで動かす場合は `postgres:5432` を使います。
 
-`docker compose down` でコンテナを停止しても、PostgreSQLデータは名前付きボリュームに残ります。画面側の`db/`はCloudflare D1用テンプレートです。Node.jsバックエンドはルートのPostgreSQLスキーマを利用し、同意前の一時登録データは永続化しないRedisに暗号化して保持します。
+`docker compose down` でコンテナを停止しても、PostgreSQLデータは名前付きボリュームに残ります。画面側の`db/`はCloudflare D1用テンプレートです。Node.jsバックエンドはルートのPostgreSQLスキーマを利用し、同意前の一時登録データはバックエンドプロセス内の一時メモリに暗号化して保持します。
 
 ### 業務テーブルの作成
 
-開発仕様書第10章を基にした PostgreSQL スキーマは [`database/README.md`](database/README.md) に記載しています。8つの基本テーブルに施設、同意文面、顔照合記録、メール配信イベントを追加した12業務テーブルと、移行管理テーブルを作成します。
+開発仕様書第10章を基にした PostgreSQL スキーマは [`database/README.md`](database/README.md) に記載しています。開発仕様書第10.1節に合わせた8業務テーブルを作成します。移行管理だけはapp_metaスキーマに置き、Redisは使用しません。
 
 ```powershell
 .\scripts\database.ps1 -Action migrate

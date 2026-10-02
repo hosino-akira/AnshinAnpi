@@ -6,9 +6,8 @@
  * 対象端末：Android／13.3インチ・タッチ液晶（横向き基準）
  * 対象画面：SCR-00〜SCR-14
  *
- * このファイルは、画面遷移とUI状態を確認するフロントエンド実装です。
- * 実運用時は、`runProcessing` の疑似処理を各バックエンドAPIへ置き換え、
- * 顔画像そのものは保存せず、カメラ画面を離れた時点でストリームを停止してください。
+ * 顔登録・本人照合は同一オリジンの端末プロキシから実APIを呼び出します。
+ * 撮影時の同意後に写真を一時保存し、登録確定時に資料をまとめて送信します。
  */
 
 import {
@@ -53,6 +52,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { createFaceClient, type FaceMetrics, type UserSession, type MailResult } from "@/lib/face-client";
+import { FaceApiError } from "@/lib/face-api";
+
+const faceClient = createFaceClient();
 
 type ScreenId =
   | "SCR-00"
@@ -92,15 +95,9 @@ const REPEAT_STEPS: ScreenId[] = [
 ];
 
 // ── 導入先で変更しやすい設定値 ──────────────────────────────────
-// 本番では MOCK_* を顔認証API／登録情報APIのレスポンスに置き換えてください。
 const INACTIVITY_WARNING_MS = 60_000;
 const TIMEOUT_GRACE_SECONDS = 30;
 const COMPLETION_SECONDS = 10;
-const MOCK_USER_NAME = "山田 太郎";
-const MOCK_RECIPIENTS: Recipient[] = [
-  { name: "山田 花子", email: "hanako@example.jp" },
-  { name: "山田 一郎", email: "ichiro@example.jp" },
-];
 
 // 個人情報保護のため、確認画面ではメールアドレスのローカル部をマスクします。
 function maskEmail(email: string) {
@@ -333,7 +330,7 @@ function CameraPanel({
 }: {
   title: string;
   actionLabel: string;
-  onSuccess: () => void;
+  onSuccess: (imageBase64: string) => void | Promise<void>;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -341,6 +338,33 @@ function CameraPanel({
     "starting" | "ready" | "blocked"
   >("starting");
   const [retryKey, setRetryKey] = useState(0);
+  const [capturing, setCapturing] = useState(false);
+  const [captureError, setCaptureError] = useState('');
+  const [photoConsent, setPhotoConsent] = useState(false);
+  const captureLock = useRef(false);
+  const capture = async () => {
+    if (captureLock.current || !photoConsent) return;
+    captureLock.current = true; setCapturing(true); setCaptureError('');
+    try {
+      const video = videoRef.current;
+      if (!video?.videoWidth || !video.videoHeight || video.readyState < 2) throw new Error('カメラ映像の準備をお待ちください。');
+      const canvas = document.createElement('canvas');
+      const ratio = Math.min(1, 1024 / Math.max(video.videoWidth, video.videoHeight));
+      canvas.width = Math.max(1, Math.round(video.videoWidth * ratio));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * ratio));
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('写真を作成できません。');
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      let imageBase64 = '';
+      for (const quality of [0.85, 0.7, 0.5]) {
+        const candidate = canvas.toDataURL('image/jpeg', quality).split(',')[1];
+        if (candidate.length <= 690000) { imageBase64 = candidate; break; }
+      }
+      if (!imageBase64) throw new Error('写真が大きすぎます。もう一度撮影してください。');
+      await onSuccess(imageBase64);
+    } catch (cause) { setCaptureError(cause instanceof Error ? cause.message : '撮影できませんでした。'); }
+    finally { captureLock.current = false; setCapturing(false); }
+  };
   useEffect(() => {
     let active = true;
     // Android端末の前面カメラを優先して取得します。
@@ -469,14 +493,20 @@ function CameraPanel({
         ) : (
           <Button
             className="touch-button primary-button camera-action"
-            disabled={cameraState !== "ready"}
-            onClick={onSuccess}
+            disabled={cameraState !== "ready" || capturing || !photoConsent}
+            onClick={() => void capture()}
           >
             <Camera aria-hidden="true" />
             {actionLabel}
             <ChevronRight aria-hidden="true" />
           </Button>
         )}
+        <label className="large-checkbox">
+          <input type="checkbox" checked={photoConsent} disabled={capturing}
+            onChange={event => setPhotoConsent(event.target.checked)}/>
+          この写真をAWSで顔認識に使用することに同意します。初回登録では登録内容の確認後に送信します。
+        </label>
+        {captureError && <p role="alert" className="field-error">{captureError}</p>}
         <p className="privacy-note">
           <LockKeyhole aria-hidden="true" />
           カメラ映像はこの確認中だけ使用します
@@ -554,6 +584,32 @@ export default function Home() {
   const [nameTouched, setNameTouched] = useState(false);
   const [contactsTouched, setContactsTouched] =
     useState(false);
+  const [faceReady, setFaceReady] = useState(false);
+  const [registrationPolicy, setRegistrationPolicy] = useState<{ policy_version: string; body: string }>();
+  const [faceError, setFaceError] = useState('');
+  const [faceMessage, setFaceMessage] = useState('正在连接人脸接口…');
+  const [faceMetrics, setFaceMetrics] = useState<Partial<FaceMetrics>>();
+  const [verifiedName, setVerifiedName] = useState('');
+  const [mailCheckId, setMailCheckId] = useState<string>();
+  const [mailResult, setMailResult] = useState<MailResult>();
+  const [safetyContacts, setSafetyContacts] = useState<Awaited<ReturnType<typeof faceClient.confirmRecipients>>>();
+  const faceDraft = useRef<string | undefined>(undefined);
+  const faceSession = useRef<UserSession | undefined>(undefined);
+  const operationVersion = useRef(0);
+  const apiBusy = useRef(false);
+  useEffect(() => {
+    let active = true;
+    Promise.all([faceClient.terminal(), faceClient.registrationPolicy()]).then(([terminal, policy]) => {
+      if (!active) return;
+      if (!terminal.capabilities.face) throw new Error('人脸服务未配置');
+      setFaceReady(true); setRegistrationPolicy(policy); setFaceMessage('真实人脸接口已连接；图片模式不检测活体。');
+    }).catch(() => { if (active) { setFaceReady(false); setFaceError('人脸接口未连接，请确认前端代理和本地后端已启动。'); } });
+    return () => {
+      active = false; operationVersion.current++;
+      if (faceDraft.current) void faceClient.cancelRegistration(faceDraft.current).catch(() => {});
+      if (faceSession.current) void faceClient.endSession(faceSession.current.user_token).catch(() => {});
+    };
+  }, []);
 
   // 連絡先は仕様書どおり1名必須・最大2名です。
   const activeRecipients = useMemo(
@@ -575,6 +631,13 @@ export default function Home() {
 
   /** 端末メモリ上の氏名・連絡先・同意状態をまとめて破棄します。 */
   const clearPrivateState = useCallback(() => {
+    operationVersion.current++;
+    setMailCheckId(undefined); setMailResult(undefined); setSafetyContacts(undefined);
+    if (faceDraft.current) void faceClient.cancelRegistration(faceDraft.current).catch(() => {});
+    if (faceSession.current) void faceClient.endSession(faceSession.current.user_token).catch(() => {});
+    faceDraft.current = undefined; faceSession.current = undefined;
+    setFaceError(''); setFaceMetrics(undefined); setVerifiedName('');
+    setFaceMessage('本次操作已结束。');
     setName("");
     setRecipients([
       { name: "", email: "" },
@@ -595,26 +658,91 @@ export default function Home() {
     setCompleteSeconds(COMPLETION_SECONDS);
     setScreen("SCR-00");
   }, [clearPrivateState]);
-  /**
-   * OVL-01（処理中）の疑似処理です。
-   * 実運用時はここをAPI呼び出しへ置き換え、成功・部分失敗・全件失敗を分岐してください。
-   */
-  const runProcessing = (
-    label: string,
-    next: ScreenId,
-    delay = 1200,
-  ) => {
-    if (processingLabel) return;
-    setProcessingLabel(label);
-    window.setTimeout(() => {
-      setProcessingLabel(null);
-      setScreen(next);
-    }, delay);
+  const runFaceApi = async (label: string, action: (checkActive: () => void) => Promise<void>) => {
+    if (apiBusy.current) return;
+    if (!faceReady) { setFaceError('人脸接口未连接。'); return; }
+    apiBusy.current = true;
+    const version = operationVersion.current;
+    const checkActive = () => { if (version !== operationVersion.current) throw new Error('OPERATION_CANCELLED'); };
+    setFaceError(''); setProcessingLabel(label);
+    try { await action(checkActive); }
+    catch (cause) {
+      if (version !== operationVersion.current) return;
+      if (cause instanceof FaceApiError) {
+        const messages: Record<string, string> = {
+          'FACE-001': '照片中没有检测到人脸。', 'FACE-002': '请确保照片中只有一人。',
+          FACE_QUALITY_FAILED: '照片质量未通过，请调整光线、清晰度和脸部角度。',
+          USER_SESSION_EXPIRED: '验证会话已过期，请返回首页重新开始。',
+          FACE_AUTH_EXPIRED: '本机 AWS 登录已过期。', FACE_ACCESS_DENIED: 'AWS 权限不足。',
+          POLICY_VERSION_CHANGED: '同意文案已更新，请返回首页后刷新页面。',
+        };
+        setFaceError(cause.status === 429 ? `操作受限，请${cause.retryAfterSeconds ? `等待 ${cause.retryAfterSeconds} 秒后` : '稍后'}重试。`
+          : `${messages[cause.code] ?? '人脸接口操作未完成。'}（${cause.code}）`
+            + (typeof cause.details?.aws_error === 'string' ? ` ${cause.details.aws_error}` : ''));
+        setFaceMetrics(cause.details as Partial<FaceMetrics> | undefined);
+      } else setFaceError(cause instanceof Error ? cause.message : '人脸处理失败。');
+    } finally { apiBusy.current = false; if (version === operationVersion.current) setProcessingLabel(null); }
   };
+
+  const captureFirstFace = (photo: string) => runFaceApi('写真を確認しています', async checkActive => {
+    if (faceDraft.current) await faceClient.cancelRegistration(faceDraft.current);
+    const draft = await faceClient.captureRegistration(photo);
+    faceDraft.current = draft.temp_id;
+    try { checkActive(); } catch (cause) { void faceClient.cancelRegistration(draft.temp_id).catch(() => {}); faceDraft.current = undefined; throw cause; }
+    setFaceMetrics(draft.metrics); setFaceMessage('照片已通过检查并暂存，请填写登记资料。'); setScreen('SCR-03');
+  });
+
+  const registerCapturedFace = () => runFaceApi('登録情報を保存しています', async checkActive => {
+    if (!faceDraft.current || !privacyAgreed || !registrationPolicy || !nameValid || !contactsValid) throw new Error('请完成拍照、姓名、联系人和登记同意。');
+    const completed = await faceClient.register({temp_id: faceDraft.current, display_name: name, recipients: activeRecipients,
+      policy_version: registrationPolicy.policy_version, consent_result: 'granted'});
+    if (!completed.user_id || !completed.user_token || !completed.expires_at) throw new Error('登记未完成。');
+    faceDraft.current = undefined;
+    faceSession.current = {user_id: completed.user_id, user_token: completed.user_token, expires_at: completed.expires_at};
+    try { checkActive(); } catch (cause) { void faceClient.endSession(completed.user_token).catch(() => {}); faceSession.current = undefined; throw cause; }
+    setFaceMessage('资料已保存，请再次拍照。比对通过后将自动发送登记通知。'); setScreen('SCR-07');
+  });
+
+  const recognizeCapturedFace = (photo: string, registration: boolean) => runFaceApi('写真を照合しています', async checkActive => {
+    if (registration && !faceSession.current?.user_id) throw new Error('请先完成登记。');
+    const result = registration
+      ? await faceClient.verifyAndNotify(photo, faceSession.current!.user_id!, faceSession.current!.user_token)
+      : await faceClient.identify(photo);
+    if (result.user_token && result.expires_at) faceSession.current = {user_id: result.user_id, user_token: result.user_token, expires_at: result.expires_at};
+    try { checkActive(); } catch (cause) { if (result.user_token) void faceClient.endSession(result.user_token).catch(() => {}); faceSession.current = undefined; throw cause; }
+    setFaceMetrics(result.metrics);
+    if (result.result !== 'matched') { setFaceError(result.result === 'ambiguous' ? '候选人脸相近，无法确认本人。' : '未匹配到用户。日常识别只匹配已激活用户。'); return; }
+    setVerifiedName(result.display_name ?? ''); setMailCheckId(result.check_id); setMailResult(undefined);
+    setFaceMessage(registration ? '比对通过，登记通知已入队。请查询邮件结果。' : '人脸匹配成功，请确认本人。');
+    setScreen(registration ? 'SCR-08' : 'SCR-11');
+  });
+
+  const confirmPerson = (confirmed: boolean) => runFaceApi('本人を確認しています', async checkActive => {
+    const current = faceSession.current;
+    if (!current?.user_id) throw new Error('请重新识别本人。');
+    const result = await faceClient.confirmRecipients(current.user_id, confirmed, current.user_token); checkActive();
+    if (!confirmed) { goHome(); return; }
+    setSafetyContacts(result); setScreen('SCR-12');
+  });
+
+  const sendSafetyMail = () => runFaceApi('安否通知を受け付けています', async checkActive => {
+    const current = faceSession.current;
+    if (!current?.user_id || !sendAgreed || !safetyContacts?.policy_version) throw new Error('请确认本人并同意发送。');
+    const result = await faceClient.notifySafety(current.user_id, true, safetyContacts.policy_version, current.user_token); checkActive();
+    if (!result.check_id) throw new Error('邮件请求未受理。');
+    setMailCheckId(result.check_id); setMailResult(undefined); setScreen('SCR-14');
+  });
+
+  const queryMail = () => runFaceApi('メール結果を確認しています', async checkActive => {
+    if (!faceSession.current || !mailCheckId) throw new Error('没有可查询的邮件记录。');
+    const result = await faceClient.mailResult(mailCheckId, faceSession.current.user_token); checkActive(); setMailResult(result);
+    setFaceMessage(`邮件状态：${result.mail_status}；用户状态：${result.user_status}。`);
+    if (result.registration_completed) setScreen('SCR-09');
+  });
 
   // SCR-09／SCR-14は10秒後にホームへ戻します（C-006）。
   useEffect(() => {
-    if (screen !== "SCR-09" && screen !== "SCR-14") return;
+    if (screen !== "SCR-09" && !(screen === "SCR-14" && mailResult?.mail_status === "accepted")) return;
     const interval = window.setInterval(
       () =>
         setCompleteSeconds((seconds) => {
@@ -628,7 +756,7 @@ export default function Home() {
       1000,
     );
     return () => window.clearInterval(interval);
-  }, [screen, goHome]);
+  }, [screen, goHome, mailResult?.mail_status]);
 
   // 60秒無操作でDLG-03を表示。ポインター操作・キー入力で計測をリセットします。
   useEffect(() => {
@@ -814,12 +942,7 @@ export default function Home() {
             <CameraPanel
               title="明るい場所で、正面を向きます"
               actionLabel="顔を撮影する"
-              onSuccess={() =>
-                runProcessing(
-                  "顔の状態を確認しています",
-                  "SCR-03",
-                )
-              }
+              onSuccess={captureFirstFace}
             />
             <ActionBar
               onBack={() => setScreen("SCR-01")}
@@ -907,22 +1030,7 @@ export default function Home() {
               tabIndex={0}
               aria-label="個人情報の取扱い本文"
             >
-              <h2>安心安否確認サービスの個人情報取扱い</h2>
-              <p>
-                本サービスでは、ご本人を確認し、登録した連絡先へ安否確認メールを送るため、氏名、顔画像から作成する顔特徴データ、連絡先の氏名・メールアドレス、利用日時、送信結果を取り扱います。
-              </p>
-              <h3>利用目的と保存について</h3>
-              <p>
-                取得した情報は、安否確認サービスの提供、本人確認、障害対応および不正利用防止のためにのみ使用します。顔画像は原則保存せず、顔特徴データは暗号化して保管します。
-              </p>
-              <h3>委託・開示・削除について</h3>
-              <p>
-                サービス運営に必要な範囲で、顔認識またはメール配信を行う委託先に情報を取り扱わせる場合があります。開示・訂正・削除・同意撤回は、施設の問い合わせ窓口へお申し出ください。
-              </p>
-              <h3>ご同意いただけない場合</h3>
-              <p>
-                同意しない場合は登録できません。同意前に撮影・入力した情報は直ちに破棄します。本サービスは緊急通報ではなく、メールの受信・閲覧を保証するものではありません。
-              </p>
+              {registrationPolicy ? <p style={{ whiteSpace: 'pre-wrap' }}>{registrationPolicy.body}</p> : <p>同意文面を読み込んでいます。接続状態をご確認ください。</p>}
             </section>
             <label
               className={`large-checkbox ${privacyAgreed ? "is-checked" : ""}`}
@@ -951,7 +1059,7 @@ export default function Home() {
                   </Button>
                   <Button
                     className="touch-button primary-button"
-                    disabled={!privacyAgreed}
+                    disabled={!privacyAgreed || !registrationPolicy}
                     onClick={() => setScreen("SCR-05")}
                   >
                     同意して次へ
@@ -968,7 +1076,7 @@ export default function Home() {
             <ScreenTitle
               kicker="初回登録 4 / 8"
               title="メールを送る相手を登録します"
-              description="1名は必須、2名まで登録できます。入力したメールアドレスへ確認メールを送ります。"
+              description="1名は必須、2名まで登録できます。現在は顔登録のテストです。確認メールはまだ送信しません。"
             />
             <div className="contacts-grid">
               {[0, ...(useSecondRecipient ? [1] : [])].map(
@@ -1167,13 +1275,8 @@ export default function Home() {
               primary={
                 <Button
                   className="touch-button primary-button"
-                  onClick={() =>
-                    runProcessing(
-                      "登録内容を安全に保存しています",
-                      "SCR-07",
-                      1500,
-                    )
-                  }
+                  disabled={!faceReady || !!processingLabel}
+                  onClick={() => void registerCapturedFace()}
                 >
                   この内容で登録する
                   <ChevronRight />
@@ -1193,13 +1296,7 @@ export default function Home() {
             <CameraPanel
               title="登録時と同じように、正面を向きます"
               actionLabel="登録を確認する"
-              onSuccess={() =>
-                runProcessing(
-                  "登録した顔と照合しています",
-                  "SCR-08",
-                  1600,
-                )
-              }
+              onSuccess={imageBase64 => recognizeCapturedFace(imageBase64, true)}
             />
             <ActionBar
               onCancel={() => setCancelOpen(true)}
@@ -1211,8 +1308,8 @@ export default function Home() {
           <div className="content-screen result-screen">
             <ScreenTitle
               kicker="初回登録 7 / 8"
-              title="確認メールを送信しました"
-              description="登録した送信相手ごとに、メールの受付結果をご確認ください。"
+              title="顔の登録と本人照合が成功しました"
+              description="写真を実際に後端へ送信し、AWSの顔照合が完了しました。"
             />
             <div className="success-banner">
               <span>
@@ -1220,35 +1317,27 @@ export default function Home() {
               </span>
               <div>
                 <h2>顔の登録を確認できました</h2>
-                <p>{name}さんの登録情報を利用できます。</p>
+                <p>{verifiedName}さんの顔を確認しました。</p>
               </div>
-            </div>
-            <div className="result-list">
-              {activeRecipients.map((recipient) => (
-                <RecipientCard
-                  key={recipient.email}
-                  name={recipient.name}
-                  email={recipient.email}
-                  status="success"
-                />
-              ))}
             </div>
             <Notice tone="info" icon={<Mail />}>
               <strong>
-                「送信受付済み」は、メール配信サービスが受け付けた状態です
+                {mailResult ? `邮件状态：${mailResult.mail_status}` : '登记通知正在处理'}
               </strong>
               <span>
-                受信箱への到着・閲覧を保証するものではありません。
+                登记通知已自动提交后台。全部联系人的邮件受理成功后，登记才完成。
               </span>
             </Notice>
+            {mailResult && <div className="result-list">{mailResult.recipient_results.map((item, index) =>
+              <p key={item.delivery_id}>連絡先 {index + 1}：{item.status}{item.error_code ? `（${item.error_code}）` : ''}</p>)}</div>}
             <ActionBar
               onCancel={() => setCancelOpen(true)}
               primary={
                 <Button
                   className="touch-button primary-button"
-                  onClick={() => setScreen("SCR-09")}
+                  onClick={() => void queryMail()}
                 >
-                  登録を完了する
+                  メール結果を確認する
                   <ChevronRight />
                 </Button>
               }
@@ -1297,13 +1386,7 @@ export default function Home() {
             <CameraPanel
               title="明るい場所で、正面を向きます"
               actionLabel="顔を確認する"
-              onSuccess={() =>
-                runProcessing(
-                  "登録情報と照合しています",
-                  "SCR-11",
-                  1600,
-                )
-              }
+              onSuccess={imageBase64 => recognizeCapturedFace(imageBase64, false)}
             />
             <ActionBar
               onCancel={() => setCancelOpen(true)}
@@ -1322,21 +1405,21 @@ export default function Home() {
                 <UserRound />
               </div>
               <p>確認できたお名前</p>
-              <h2>{MOCK_USER_NAME}さん</h2>
+              <h2>{verifiedName}さん</h2>
               <span>このお名前で登録されています</span>
             </div>
             <div className="identity-actions">
               <Button
                 variant="outline"
                 className="identity-no"
-                onClick={goHome}
+                onClick={() => void confirmPerson(false)}
               >
                 <X />
                 ちがいます
               </Button>
               <Button
                 className="identity-yes"
-                onClick={() => setScreen("SCR-12")}
+                onClick={() => void confirmPerson(true)}
               >
                 <Check />
                 はい、本人です
@@ -1355,7 +1438,7 @@ export default function Home() {
             <ScreenTitle
               kicker="安否確認 3 / 5"
               title="安否確認メールを送信します"
-              description={`下記の登録済みの方へ、${MOCK_USER_NAME}さんが操作したことをメールでお知らせします。`}
+              description={`下記の登録済みの方へ、${verifiedName}さんが操作したことをメールでお知らせします。`}
             />
             <div className="recipient-intro">
               <span>
@@ -1364,16 +1447,16 @@ export default function Home() {
               <div>
                 <small>今回の送信先</small>
                 <strong>
-                  {MOCK_RECIPIENTS.length}名へ送信します
+                  {(safetyContacts?.recipients.length ?? 0)}名へ送信します
                 </strong>
               </div>
             </div>
             <div className="result-list">
-              {MOCK_RECIPIENTS.map((recipient) => (
+              {(safetyContacts?.recipients ?? []).map((recipient) => (
                 <RecipientCard
-                  key={recipient.email}
+                  key={recipient.recipient_id}
                   name={recipient.name}
-                  email={recipient.email}
+                  email={recipient.masked_email}
                 />
               ))}
             </div>
@@ -1406,7 +1489,7 @@ export default function Home() {
             <ScreenTitle
               kicker="安否確認 4 / 5"
               title="送信内容をご確認ください"
-              description={`同意して送信ボタンを押すと、登録済みの${MOCK_RECIPIENTS.length}名へそれぞれ1通ずつ送信します。`}
+              description={`同意して送信ボタンを押すと、登録済みの${(safetyContacts?.recipients.length ?? 0)}名へそれぞれ1通ずつ送信します。`}
             />
             <section className="mail-preview">
               <div className="mail-preview-head">
@@ -1414,14 +1497,14 @@ export default function Home() {
                 <span>
                   <small>送信されるメール</small>
                   <strong>
-                    【安心安否確認】{MOCK_USER_NAME}
+                    【安心安否確認】{verifiedName}
                     さんからのお知らせ
                   </strong>
                 </span>
               </div>
               <div className="mail-body">
                 <p>
-                  {MOCK_USER_NAME}
+                  {verifiedName}
                   さんが、安否確認操作を行いました。
                 </p>
                 <p>
@@ -1432,6 +1515,7 @@ export default function Home() {
                 </small>
               </div>
             </section>
+            <Notice tone="info"><span>{safetyContacts?.consent_body}</span></Notice>
             <label
               className={`large-checkbox send-checkbox ${sendAgreed ? "is-checked" : ""}`}
             >
@@ -1453,13 +1537,7 @@ export default function Home() {
                 <Button
                   className="touch-button primary-button send-button"
                   disabled={!sendAgreed}
-                  onClick={() =>
-                    runProcessing(
-                      "メールを安全に送信しています",
-                      "SCR-14",
-                      1800,
-                    )
-                  }
+                  onClick={() => void sendSafetyMail()}
                 >
                   <ShieldCheck />
                   同意して送信する
@@ -1477,7 +1555,7 @@ export default function Home() {
               </div>
               <div>
                 <p>安否確認 5 / 5</p>
-                <h1>送信が完了しました</h1>
+                <h1>{mailResult?.mail_status === "accepted" ? "送信が受け付けられました" : "メール処理結果"}</h1>
                 <span>
                   {new Intl.DateTimeFormat("ja-JP", {
                     dateStyle: "long",
@@ -1487,31 +1565,33 @@ export default function Home() {
               </div>
             </div>
             <div className="result-list">
-              {MOCK_RECIPIENTS.map((recipient) => (
+              {(safetyContacts?.recipients ?? []).map((recipient) => (
                 <RecipientCard
-                  key={recipient.email}
+                  key={recipient.recipient_id}
                   name={recipient.name}
-                  email={recipient.email}
-                  status="success"
+                  email={recipient.masked_email}
+                  status={mailResult?.recipient_results.find(item => item.recipient_id === recipient.recipient_id)?.status === 'accepted' ? 'success' : undefined}
                 />
               ))}
             </div>
-            <Notice tone="success" icon={<ShieldCheck />}>
+            <Notice tone={mailResult?.mail_status === 'accepted' ? 'success' : 'info'} icon={<ShieldCheck />}>
               <strong>
-                {MOCK_RECIPIENTS.length}
-                名への送信が受け付けられました
+                {mailResult ? `処理状態：${mailResult.mail_status}` : 'メール処理中です。結果を確認してください。'}
               </strong>
               <span>
                 同じ操作によるメールは重複して送信されません。
               </span>
             </Notice>
+            {mailResult && <div className="result-list">{mailResult.recipient_results.map((item, index) =>
+              <p key={item.delivery_id}>連絡先 {index + 1}：{item.status}{item.error_code ? `（${item.error_code}）` : ''}</p>)}</div>}
             <ActionBar
               primary={
                 <>
-                  <p className="bar-countdown">
+                  <Button className="touch-button" onClick={() => void queryMail()}>メール結果を確認する</Button>
+                  {mailResult?.mail_status === 'accepted' && <p className="bar-countdown">
                     自動終了まで{" "}
                     <strong>{completeSeconds}秒</strong>
-                  </p>
+                  </p>}
                   <Button
                     className="touch-button primary-button"
                     onClick={goHome}
@@ -1533,6 +1613,21 @@ export default function Home() {
     >
       {/* 全画面共通：端末状態、手続き進捗、現在画面 */}
       <StatusHeader screen={screen} />
+      <section aria-label="真实人脸接口状态" style={{ padding: '8px 24px', background: '#f1f5f9' }}>
+        <p role="status">{faceMessage}</p>
+        {faceError && <p role="alert" style={{ color: '#b91c1c' }}>{faceError}</p>}
+        {faceMetrics && <p>
+          人脸相似度：{typeof faceMetrics.similarity_score === 'number' ? faceMetrics.similarity_score.toFixed(2) : '无可用分数'}
+          {typeof faceMetrics.match_threshold === 'number' && `；匹配门槛：${faceMetrics.match_threshold.toFixed(2)}`}
+          ；人脸检测置信度：{typeof faceMetrics.face_confidence === 'number' ? faceMetrics.face_confidence.toFixed(2) : '无可用分数'}
+          ；亮度：{typeof faceMetrics.brightness === 'number' ? faceMetrics.brightness.toFixed(2) : '无可用分数'}
+          ；清晰度：{typeof faceMetrics.sharpness === 'number' ? faceMetrics.sharpness.toFixed(2) : '无可用分数'}
+          。图片模式不检测活体。
+        </p>}
+      </section>
+      {import.meta.env.DEV && <nav aria-label="真实接口测试" style={{ padding: '8px 24px', textAlign: 'right' }}>
+        <a href="/dev/face">真实人脸接口测试：图片登记 / 识别 / 评分</a>
+      </nav>}
       <StepRail screen={screen} />
       <div className="screen-stage">{renderScreen()}</div>
 

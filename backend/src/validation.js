@@ -12,7 +12,19 @@ export const bodySchemas = {
   profile: z.strictObject({ display_name: displayName }),
   recipients: z.strictObject({ recipients }),
   consent: z.strictObject({ policy_version: z.string().min(1).max(50), result: z.enum(['granted', 'denied']) }),
-  face: z.strictObject({ liveness_session_id: uuid }),
+  face: z.union([
+    z.strictObject({ liveness_session_id: uuid }),
+    z.strictObject({ image_base64: z.string().min(4).max(700000)
+      .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/) }),
+  ]),
+  photoCapture: z.strictObject({ image_base64: z.string().min(4).max(700000)
+    .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/) }),
+  registration: z.strictObject({ temp_id: uuid, display_name: displayName, recipients,
+    policy_version: z.string().min(1).max(50), consent_result: z.enum(['granted','denied']) }),
+  registrationVerification: z.strictObject({ user_id: uuid, image_base64: z.string().min(4).max(700000)
+    .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/) }),
+  recipientConfirmation: z.strictObject({ confirmed: z.boolean() }),
+  safetyNotification: z.strictObject({ user_id: uuid, consent: z.boolean(), policy_version: z.string().min(1).max(50) }),
   confirmation: z.strictObject({ confirmed: z.boolean() }),
   safety: z.strictObject({ policy_version: z.string().min(1).max(50), consent: z.literal(true) }),
   liveness: z.strictObject({ purpose: z.enum(['enrollment', 'registration', 'safety']), enrollment_id: uuid.optional() })

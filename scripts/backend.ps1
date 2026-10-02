@@ -7,7 +7,7 @@ function Initialize-BackendEnvironment {
     $envPath=Join-Path $projectRoot '.env'
     if (-not (Test-Path -LiteralPath $envPath)) { Copy-Item -LiteralPath (Join-Path $projectRoot '.env.example') -Destination $envPath }
     $contents=Get-Content -LiteralPath $envPath -Raw -Encoding UTF8
-    foreach ($key in @('REDIS_PASSWORD','DATA_ENCRYPTION_KEY','TEMPORARY_ENCRYPTION_KEY','LOOKUP_HMAC_KEY','AUDIT_HMAC_KEY')) {
+    foreach ($key in @('DATA_ENCRYPTION_KEY','TEMPORARY_ENCRYPTION_KEY','AUDIT_HMAC_KEY')) {
         $match=[regex]::Match($contents, "(?m)^$key=(.*)$")
         if ($match.Success -and $match.Groups[1].Value.Trim().Length -gt 0) { continue }
         $bytes=New-Object byte[] 32
@@ -24,7 +24,7 @@ switch ($Action) {
     'setup' { Initialize-BackendEnvironment }
     'start' {
         Initialize-BackendEnvironment
-        & docker compose --project-directory $projectRoot up -d --wait postgres redis; Test-Exit
+        & docker compose --project-directory $projectRoot up -d --wait postgres; Test-Exit
         & (Join-Path $PSScriptRoot 'database.ps1') -Action migrate
         & docker compose --project-directory $projectRoot up -d --build --wait api; Test-Exit
     }

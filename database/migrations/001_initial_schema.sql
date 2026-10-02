@@ -5,11 +5,17 @@ SET LOCAL TIME ZONE 'UTC';
 SET LOCAL search_path = public, pg_catalog;
 SELECT pg_advisory_xact_lock(17001001);
 
-CREATE TABLE IF NOT EXISTS schema_migrations (
+CREATE SCHEMA IF NOT EXISTS app_meta;
+DO $$ BEGIN
+ IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+  ALTER TABLE public.schema_migrations SET SCHEMA app_meta;
+ END IF;
+END; $$;
+CREATE TABLE IF NOT EXISTS app_meta.schema_migrations (
     version varchar(100) PRIMARY KEY,
     applied_at timestamptz NOT NULL DEFAULT current_timestamp
 );
-SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '001_initial_schema') AS already_applied \gset
+SELECT EXISTS (SELECT 1 FROM app_meta.schema_migrations WHERE version = '001_initial_schema') AS already_applied \gset
 \if :already_applied
     \echo '001_initial_schema already applied; skipping.'
 \else
@@ -540,6 +546,6 @@ BEGIN
 END;
 $$;
 
-INSERT INTO schema_migrations(version) VALUES ('001_initial_schema');
+INSERT INTO app_meta.schema_migrations(version) VALUES ('001_initial_schema');
 \endif
 COMMIT;

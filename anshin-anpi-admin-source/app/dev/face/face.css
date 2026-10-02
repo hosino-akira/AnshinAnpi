@@ -1,0 +1,14 @@
+.face-dev { max-width: 850px; margin: 32px auto; padding: 0 20px 48px; color: #193334; }
+.face-dev h1 { font-size: 28px; margin: 16px 0; }
+.face-dev h2 { font-size: 21px; margin: 0 0 16px; }
+.face-dev p { line-height: 1.7; }
+.face-card { background: white; border: 1px solid #cadbda; border-radius: 16px; padding: 24px; margin: 20px 0; }
+.face-card label { display: block; margin: 16px 0; }
+.face-card input:not([type=checkbox]) { display: block; width: 100%; border: 1px solid #8ba9a6; border-radius: 8px; padding: 10px; margin-top: 6px; }
+.face-dev button { background: #146e66; color: white; border: 0; border-radius: 8px; padding: 12px 18px; cursor: pointer; font-size: 16px; }
+.face-dev button:disabled { opacity: .5; cursor: not-allowed; }
+.face-dev button.face-secondary { background: #e8efee; color: #193334; }
+.face-consent input { margin-right: 8px; }
+.face-status { padding: 14px; background: #eaf6f1; border-radius: 8px; }
+.face-error { padding: 14px; background: #fff0ed; color: #982c24; border-radius: 8px; }
+.face-camera { margin: 24px 0; min-height: 400px; }

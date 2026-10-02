@@ -121,18 +121,14 @@ test('SES ambiguous network errors cannot be automatically retried', async () =>
 });
 
 test('temporary draft has a physical idle TTL and completion lock lasts through commit', async () => {
-  const entries = new Map(); let latestOptions;
-  const redis = {
-    async set(key,value,options) { latestOptions=options; if(options.NX && entries.has(key)) return null; entries.set(key,value); return 'OK'; },
-    async get(key) { return entries.get(key) ?? null; },
-    async eval(script,{ keys,arguments:args }) { if(entries.get(keys[0])===args[0]) { entries.delete(keys[0]); return 1; } return 0; }
-  };
-  const store = new TemporaryStore(redis,{ redisPrefix:'test:',temporaryKey:randomBytes(32),idleTtlSeconds:90 });
+  const store = new TemporaryStore({temporaryKey:randomBytes(32),idleTtlSeconds:90});
   await store.put('draft','id',{ name:'temporary' },new Date(Date.now()+900000));
-  assert.equal(latestOptions.EX,90);
+  const remaining=await store.state.ttl(store.key('draft','id'));
+  assert.ok(remaining>0 && remaining<=90);
   const ctx={ commits:[],rollbacks:[] };
   await store.lock('draft','id',async()=>({ completed:true }),ctx);
   await assert.rejects(store.lock('draft','id',async()=>null),error=>error.code==='OPERATION_IN_PROGRESS');
   await ctx.commits[0]();
   await store.lock('draft','id',async()=>true);
+  store.close();
 });

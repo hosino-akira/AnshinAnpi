@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.13.0" },
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
@@ -11,19 +13,20 @@
     "test:integration": "node --test --test-concurrency=1 test/integration/*.test.js",
     "docs:generate": "node scripts/generate-openapi.js",
     "provision:dev": "node scripts/provision-dev.js",
+    "check:rekognition": "node scripts/check-rekognition.js",
+    "check:rekognition:liveness": "node scripts/check-rekognition.js --liveness",
     "verify:audit": "node scripts/verify-audit.js"
   },
   "dependencies": {
     "@aws-sdk/client-kms": "^3.0.0",
     "@aws-sdk/client-rekognition": "^3.0.0",
+    "@aws-sdk/client-secrets-manager": "^3.0.0",
     "@aws-sdk/client-sesv2": "^3.0.0",
     "@aws-sdk/client-sns": "^3.0.0",
-    "@aws-sdk/client-secrets-manager": "^3.0.0",
     "@fastify/cors": "^11.0.0",
     "@fastify/helmet": "^13.0.0",
     "fastify": "^5.12.5",
     "pg": "^8.0.0",
-    "redis": "^5.0.0",
     "zod": "^4.0.0"
   }
 }

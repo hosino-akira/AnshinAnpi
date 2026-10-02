@@ -1,9 +1,13 @@
 import pg from 'pg';
 
 export function createPool(config) {
-  return new pg.Pool({ ...config.postgres, ...(config.postgresSsl ? { ssl: { rejectUnauthorized: true } } : {}),
+  const pool = new pg.Pool({ ...config.postgres, ...(config.postgresSsl ? { ssl: { rejectUnauthorized: true } } : {}),
     max: 12, connectionTimeoutMillis: 5000, idleTimeoutMillis: 30000,
     options: '-c timezone=UTC -c statement_timeout=20000 -c lock_timeout=10000' });
+  // Restarting local PostgreSQL closes idle connections. pg replaces these;
+  // handle the event so the single API process stays available to reconnect.
+  pool.on('error', () => console.error('DATABASE_CONNECTION_LOST'));
+  return pool;
 }
 
 export async function transaction(pool, action) {
