@@ -1,326 +1,88 @@
-# 前端联调交接：最终版登记与安否接口
+# Android 用户端接口对接（简化版）
 
-更新日期：2026-10-05。本文对应主目录 `C:\Users\27357\anshin-anpi` 的 main 分支实现；后续开发直接在该目录进行。
+版本：0.4.0。后端地址：`http://192.168.0.51:3002`，IP 变化时同步更新。
 
-## 地址与联调前提
+## 请求约定
 
-| 用途 | 地址 |
-| --- | --- |
-| 同事使用的后端基础地址 | `http://192.168.0.51:3002` |
-| 本机后端 | `http://127.0.0.1:3002` |
-| 就绪检查（公开） | `http://192.168.0.51:3002/health/ready` |
-| OpenAPI（公开，可导入 API 工具） | `http://192.168.0.51:3002/openapi.json` |
-| 当前登记同意文面（公开） | `http://192.168.0.51:3002/v1/consent-policies?type=registration` |
-| 本机摄像头首页 | `http://localhost:5173/` |
-| 本机照片上传测试页 | `http://localhost:5173/dev/face` |
+所有客户端按同一个机器人处理，不传终端 ID、终端凭据或 Authorization，不返回 user_token。
+注册和识别返回 user_id，后续直接使用该 ID。人脸识别、本人确认、同意步骤仍按下面顺序执行，后端保留验证有效期与防重复发送检查。
 
-192.168.0.51 是开发机局域网地址，地址变更时更新 Android App 的后端地址。App 直接访问 3002，不需要网页代理或终端凭据。本机 5173 的网页和照片上传页供开发自测使用。
+POST / DELETE 使用 Content-Type: application/json 和 Idempotency-Key: <本次操作的 UUID>。
+同一次请求的网络重试必须复用同一个编号和相同正文；新的操作使用新编号。
+照片使用 JPEG/PNG 纯 Base64，不带 data URL 前缀，解码后最多 512 KiB。
 
-**当前环境限制：** 新接口已用真实 PostgreSQL、注入的测试人脸/邮件服务验证；测试不发送真实邮件。此前检查的是旧地区 `us-east-1`，当时 `anshin-anpi-faces-dev` Collection 不存在、SES 未配置、邮件工作进程关闭。现已改用东京 `ap-northeast-1`，需要以主目录当前配置重新验证对应资源，不能沿用旧地区的检查结果。因此文面接口可直接联调，真实登记、识别、邮件全流程还需恢复 Collection、配置 SES 发件身份和权限，并启用邮件工作进程后重启后端。`/health/ready` 只检查数据库，`capabilities.face/mail` 只表示配置齐全，不保证外部资源可用。不要把健康检查 200 理解为邮件发送成功。
+## 注册顺序
 
-## 流程与状态
+| 步骤 | 请求 | 响应及页面处理 |
+| --- | --- | --- |
+| ① 第一次采集 | POST /v1/registrations/capture；image_base64 | face_valid、temp_id、expires_at；通过后继续填写资料 |
+| ② 获取同意文案 | GET /v1/consent-policies?type=registration | title、body、policy_version |
+| ③ 确定登记 | POST /v1/registrations；temp_id、display_name、recipients、consent_result、policy_version | success、user_id、user_status=pending_registration；保存 user_id |
+| ④ 第二次验证并自动发通知 | POST /v1/registrations/verify；user_id、image_base64 | matched、similarity_score、metrics、verification_status；匹配并提交成功时还有 check_id、send_requested=true |
 
-临时采集返回 `temp_id`，它用于关联第一张照片，不是正式用户 ID，不创建 users 记录。照片通过检查后只保存在后端加密内存，最长 15 分钟，90 秒无接口操作会失效；返回的 `expires_at` 是最长有效期，不覆盖闲置限制。填写资料期间可每 30 秒调用 `GET /v1/registrations/{temp_id}` 保持草稿，停止操作就停止轮询。后端重启会丢失草稿。
+recipients 为 1～2 个联系人：[{"name":"家族","email":"family@example.com"}]。
+consent_result 为 granted / denied；拒绝同意不会创建用户。
+第二次照片只与本次 user_id 对应的人脸比较。matched=false 时重拍，不发邮件。
+匹配并返回 send_requested=true 后，用户端显示通知提交成功并结束操作，**删除原注册⑤的邮件轮询步骤**。
+后台按邮件处理结果更新登记状态，用户端不等待或展示实际结果。
 
-确定登记时一次提交全部资料，返回正式 `user_id` 和 `pending_registration`。第二次照片验证通过，自动创建一批**连络先登记通知**，不需要前端再调用发信接口。查询结果中 `registration_completed=true`、`user_status=active` 才表示登记完成；部分收件人失败则保持 `pending_registration`。日常人脸识别只匹配 active 用户。
+## 安否顺序
 
-业务登记状态只有 `pending_registration → active` 两阶段；临时照片是草稿，邮件另有处理状态。`suspended/deleted` 是后台管理状态，不是正常登记步骤。
+| 步骤 | 请求 | 响应及页面处理 |
+| --- | --- | --- |
+| ① 识别人脸 | POST /v1/faces/identify；image_base64 | matched；成功时 display_name、user_id、metrics；未匹配不返回姓名或用户 ID |
+| ② 确认本人并获取联系人 | POST /v1/users/{user_id}/recipients；confirmed=true | 联系人 name、masked_email，同时 consent_body、policy_version |
+| ③ 同意并发送 | POST /v1/safety-notifications；user_id、consent=true、policy_version | 202：success=true、send_requested=true、check_id、user_id；显示发送成功并结束 |
 
-第一次邮件主题为 `【安心安否確認】連絡先登録のお知らせ`，告知联系人登记事实、登记人和时间。后续安否邮件主题为 `【安心安否確認】{姓名}さんからのお知らせ`，告知本人本次安否操作。初回不额外发送一封安否邮件。每位联系人单独收信。
+confirmed=false 表示不是本人，不返回联系人、不发送邮件。
+consent=false 表示不同意发送，返回 send_requested=false、check_id=null，不创建邮件请求。
 
-## 接口总表
-
-以下路径都接在后端基础地址后。用户令牌来自对应操作返回的 `user_token`，放在 Authorization 请求头中。
-
-| 步骤 | 方法与路径 | JSON 请求 | 成功响应重点 | 用户令牌 |
-| --- | --- | --- | --- | --- |
-| 注册① 第一次照片 | `POST /v1/registrations/capture` | `image_base64` | 201：`temp_id, face_valid, metrics, expires_at` | 无 |
-| 注册② 同意文面 | `GET /v1/consent-policies?type=registration` | 无 | 200：`title, body, policy_version` | 无，公开 |
-| 注册③ 确定登记 | `POST /v1/registrations` | `temp_id, display_name, recipients, policy_version, consent_result` | 201：`success, user_id, user_status, user_token, expires_at` | 无 |
-| 注册④ 再次验证并自动通知 | `POST /v1/registrations/verify` | `image_base64, user_id` | 200：`matched, metrics, user_status`；匹配时增加 `check_id, mail_status, recipient_results` 和新令牌 | 注册③令牌 |
-| 注册⑤ 查邮件结果 | `GET /v1/mail-results/{check_id}` | 无 | 200：各联系人状态、`registration_completed, user_status, mail_status` | 注册④新令牌 |
-| 安否① 识别人脸 | `POST /v1/faces/identify` | `image_base64` | 200：`matched, result, metrics`；匹配时增加 `display_name, user_id, user_token, expires_at` | 无 |
-| 安否② 本人点“是”并取联系人 | `POST /v1/users/{user_id}/recipients` | `confirmed: true` | 200：`recipients, consent_body, policy_version` | 安否①令牌 |
-| 安否③ 同意发送 | `POST /v1/safety-notifications` | `user_id, consent, policy_version` | 202：`check_id, mail_status, recipient_results` | 安否①令牌 |
-| 安否结果查询 | `GET /v1/mail-results/{check_id}` | 无 | 200：逐收件人结果 | 安否①令牌 |
-
-辅助接口：`GET/DELETE /v1/registrations/{temp_id}` 查询/取消草稿；`DELETE /v1/sessions/current` 结束会话；`POST /v1/mail-results/{check_id}/retry` 请求重试允许重试的失败收件人（请求体 `{}`）。查询邮件结果始终只读，不触发发送。
-
-## 连接与请求头
-
-当前为单机器人模式。后端固定使用 LOCAL-DEV-01，复用已有终端 UUID；空库自动初始化固定记录。Android App 直接请求后端基础地址加 /v1/...，不需要 X-Terminal-Id、X-Terminal-Token 或终端凭据文件。旧客户端传这两个请求头也不会切换设备身份。所有能连接后端的客户端都按同一机器人处理。
-
-注册①首次照片的完整请求：
+发送示例：
 
 ```http
-POST http://192.168.0.51:3002/v1/registrations/capture
+POST /v1/safety-notifications HTTP/1.1
+Host: 192.168.0.51:3002
 Content-Type: application/json
-Idempotency-Key: <本次采集的 UUID>
+Idempotency-Key: 11111111-1111-4111-8111-111111111111
+
+{"user_id":"22222222-2222-4222-8222-222222222222","consent":true,"policy_version":"dev-v1"}
 ```
 
 ```json
-{ "image_base64": "<JPEG 或 PNG 的纯 Base64>" }
+{"success":true,"send_requested":true,"check_id":"33333333-3333-4333-8333-333333333333","user_id":"22222222-2222-4222-8222-222222222222"}
 ```
 
-- AWS 凭据只由后端管理；App 不需要 AWS Profile 或 Access Key。
-- Authorization: Bearer <user_token> 仅在接口总表标注用户令牌的步骤必需，user_id 不能替代令牌。
-- POST、PUT、PATCH、DELETE 都需要 Idempotency-Key，GET 不需要；SNS 邮件回调使用独立签名校验。
-- 一次操作生成一个键；超时/断线重试保留相同键、正文和原令牌。新照片使用新键。同键不同内容返回 409 IDEMPOTENCY_CONFLICT。
-- 注册④成功后换用新的 user_token 查询结果；重试注册④原请求仍使用原令牌。
-- 用户令牌最长有效 3 分钟，闲置 90 秒失效。轮询建议每 2–3 秒，离开页面停止并清理个人数据。
-- 当前无 Redis，为单后端进程；发送编号存在 PostgreSQL，重启不会重复创建已提交的邮件批次。
-- 固定机器人状态不是 active 时返回 503 TERMINAL_UNAVAILABLE；重新启动不会自动恢复被停用的记录。
-- Android 的 localhost 指设备自身。局域网联调使用开发机 IP，网络需可达并允许 HTTP；正式部署使用 HTTPS。
+## 用户端邮件展示
 
-本机网页自测可继续使用 /api/terminal/... 同源代理；代理只转发用户令牌和防重复编号，无需读取终端凭据文件。网页代理保留仅本机访问限制。Android App 不经过这个代理。
+后端接受发送请求后，用户端统一显示“发送成功”，不查询或展示排队、发送失败、部分失败、送达、退信等状态，也不提供邮件重试按钮。
+这里的成功表示**发送请求已提交给后端**，不是客户已收到邮件的保证。异步发送失败不改变用户端完成页。
+接口未接受请求或网络中断时，不伪造发送记录；用户端可以结束操作，不展示具体邮件失败原因，开发日志用于排查。
+实际邮件是否被服务商接受、投递或退信，继续保存在后端，之后单独与管理端联动。
+/v1/mail-results 与 retry 暂留作后端诊断，Android 用户端不调用。
 
-先测试 GET /health/ready 和公开同意文面。地址打不开时检查 IP、Windows 防火墙以及 API_HOST=0.0.0.0。健康检查通过只代表数据库连接正常；真实照片和邮件仍需验证 AWS 资源与权限。
+## 结束操作
 
-## 照片与评分
+草稿取消：DELETE /v1/registrations/{temp_id}。
+登记后的操作结束：DELETE /v1/sessions/current，正文 {"user_id":"..."}。
+结束时清空界面中的照片、姓名、联系人和 user_id。若验证已过期，直接清空即可。
+本机网页自测可走 /api/terminal/...；Android 直接调用后端 /v1/...。
 
-```json
-{ "image_base64": "<JPEG 或 PNG 的纯 Base64>" }
-```
-
-不含 `data:image/jpeg;base64,` 前缀；解码后最多 512 KiB。摄像头可以用 canvas.toDataURL('image/jpeg', 0.85).split(',')[1] 获取字节。本项目前端先缩小到最长边 1024，再压缩。图片中只允许一张人脸，检测置信度、亮度、清晰度、姿态由 AWS 检查。
-
-`metrics.similarity_score` 为 0–100 的人脸相似度；没有候选则 null，不能显示成 0 分。第一次采集没有相似度；`face_confidence` 是检测到脸的置信度。`brightness/sharpness` 是照片质量。`match_threshold` 是后端当前匹配门槛（默认 99 分），不由前端指定。图片模式 `liveness_passed=false`，没有活体分数，不要求靠近屏幕做活体挑战，也不需要 Cognito 身份池。
-
-## 注册请求与响应示例
-
-### ① 首次采集
-
-POST /v1/registrations/capture（照片授权应在拍照/上传前完成）：
-
-```json
-{ "image_base64": "<第一张照片>" }
-```
-
-201：
-
-```json
-{
-  "face_valid": true,
-  "temp_id": "11111111-1111-4111-8111-111111111111",
-  "expires_at": "2026-10-02T08:15:00.000Z",
-  "idle_timeout_seconds": 90,
-  "metrics": { "face_confidence": 100, "brightness": 80, "sharpness": 97, "liveness_passed": false }
-}
-```
-
-检查失败返回 400/422，不会返回可用于正式登记的 temp_id，也不会创建正式用户。
-
-### ② 获取同意文面
-
-GET /v1/consent-policies?type=registration，200：
-
-```json
-{
-  "type": "registration",
-  "policy_version": "dev-v1",
-  "title": "開発確認用同意文面",
-  "body": "<当前版本完整正文>",
-  "requires_reconsent": false
-}
-```
-
-正文和版本保存在 `backend/config/consent-policies.json`，不再有 consent_policies 数据表。展示完整正文，登记提交刚展示的版本，不硬编码。正文变更时同步变更版本并重启后端；旧版本提交返回 409 POLICY_VERSION_CHANGED。
-
-### ③ 一次提交登记资料
-
-POST /v1/registrations：
-
-```json
-{
-  "temp_id": "11111111-1111-4111-8111-111111111111",
-  "display_name": "登记人姓名",
-  "recipients": [{ "name": "联系人姓名", "email": "contact@example.com" }],
-  "policy_version": "dev-v1",
-  "consent_result": "granted"
-}
-```
-
-姓名 1–50 字符；联系人必填 1 人，最多 2 人；联系人邮箱不能重复。姓名和邮箱会规范化。201：
-
-```json
-{
-  "success": true,
-  "user_id": "22222222-2222-4222-8222-222222222222",
-  "status": "pending_registration",
-  "user_status": "pending_registration",
-  "registration_completed": false,
-  "user_token": "<登记会话令牌>",
-  "expires_at": "2026-10-02T08:03:00.000Z"
-}
-```
-
-不再分别提交姓名、同意、联系人。拒绝可用 consent_result=denied（仍需完整合法正文），返回 200 success=false、user_id=null、status=cancelled，并清除临时照片。仅取消页面时用 DELETE /v1/registrations/{temp_id}，不需填写资料。
-
-### ④ 第二次照片验证并自动登记通知
-
-POST /v1/registrations/verify，带注册③令牌及本步骤防重复请求编号：
-
-```json
-{ "image_base64": "<第二张照片>", "user_id": "22222222-2222-4222-8222-222222222222" }
-```
-
-匹配成功 200（示意评分）：
-
-```json
-{
-  "matched": true,
-  "result": "matched",
-  "verification_status": "verified",
-  "user_id": "22222222-2222-4222-8222-222222222222",
-  "user_status": "pending_registration",
-  "display_name": "登记人姓名",
-  "similarity_score": 99.9,
-  "metrics": { "similarity_score": 99.9, "match_threshold": 99, "liveness_passed": false },
-  "check_id": "33333333-3333-4333-8333-333333333333",
-  "mail_status": "queued",
-  "recipient_results": [{ "delivery_id": "44444444-4444-4444-8444-444444444444", "recipient_id": "55555555-5555-4555-8555-555555555555", "status": "queued" }],
-  "registration_completed": false,
-  "user_token": "<新的查询令牌>",
-  "expires_at": "2026-10-02T08:04:00.000Z"
-}
-```
-
-不匹配也为 200：matched=false、result=no_match、verification_status=not_matched、metrics、user_status 和 attempts_remaining，没有 check_id/新令牌，不发邮件；保留原登记令牌以重新拍照。user_id 与令牌不一致返回 403。邮件服务没配置时匹配流程返回 503，事务回滚，不撤销原令牌，不创建假发送记录。
-
-### ⑤ 查询登记通知
-
-GET /v1/mail-results/{check_id}，带注册④的新令牌。全部受理成功后 200：
-
-```json
-{
-  "check_id": "33333333-3333-4333-8333-333333333333",
-  "type": "registration",
-  "status": "accepted",
-  "mail_status": "accepted",
-  "user_id": "22222222-2222-4222-8222-222222222222",
-  "user_status": "active",
-  "registration_completed": true,
-  "created_at": "2026-10-02T08:01:00.000Z",
-  "completed_at": "2026-10-02T08:01:01.000Z",
-  "recipient_results": [{ "delivery_id": "44444444-4444-4444-8444-444444444444", "recipient_id": "55555555-5555-4555-8555-555555555555", "status": "accepted", "attempt_count": 1, "error_code": null }]
-}
-```
-
-实际结果还包含 accepted_at、delivered_at、bounced_at，可为 null。仅查询，不需防重复编号，不能重新请求注册④来查状态。
-
-## 安否请求与响应示例
-
-### ① 识别
-
-POST /v1/faces/identify，正文只有 image_base64。匹配成功返回 matched=true、result=matched、verification_status=verified、display_name、user_id、user_status=active、user_token、expires_at、metrics 和 similarity_score。
-
-没有匹配或候选太接近返回 200 matched=false，result=no_match/ambiguous；不返回姓名、用户 ID 或令牌。不把 HTTP 200 自动当成识别成功。
-
-### ② 本人确认后获取发送对象
-
-POST /v1/users/{识别返回的user_id}/recipients，Authorization 使用安否①令牌：
-
-```json
-{ "confirmed": true }
-```
-
-200：
-
-```json
-{
-  "success": true,
-  "confirmed": true,
-  "user_id": "22222222-2222-4222-8222-222222222222",
-  "recipients": [{ "recipient_id": "55555555-5555-4555-8555-555555555555", "name": "联系人姓名", "masked_email": "co•••@example.com", "status": "active" }],
-  "consent_body": "<本次发送的同意正文>",
-  "policy_version": "dev-v1"
-}
-```
-
-注意是 **POST**，同时记录本人确认并取发送对象，不是未经确认的 GET。用户点“不是本人”发送 confirmed=false：success=false、recipients=[]、session_ended=true，撤销会话，不发送邮件。
-
-### ③ 同意并发送安否通知
-
-POST /v1/safety-notifications，带安否①令牌和本步骤 Idempotency-Key：
-
-```json
-{ "user_id": "22222222-2222-4222-8222-222222222222", "consent": true, "policy_version": "dev-v1" }
-```
-
-202：check_id、user_id、status=queued、mail_status=queued、recipient_results。随后 GET /v1/mail-results/{check_id}，type=safety；此时 registration_completed=false 表示这条记录不是登记通知，**不表示用户的登记失效**，用户状态仍为 active。
-
-拒绝发送 consent=false 返回 200 check_id=null、mail_status=cancelled、recipient_results=[]、session_ended=true，不创建发送记录。未先确认本人发送则 403 IDENTITY_CONFIRMATION_REQUIRED。
-
-## 可复用前端调用代码
-
-下面是本机网页自测代码，使用同源代理。Android App 直接调用接口总表中的 /v1 路径，按相同正文、用户令牌和防重复编号规则实现；无需复制浏览器代码。示例不自动重试整条流程。
+## 调用示例
 
 ```ts
-import { createFaceClient } from './face-client';
-const api = createFaceClient('/api/terminal');
-const captureKey = crypto.randomUUID();
-const draft = await api.captureRegistration(firstImageBase64, captureKey);
+const api = createFaceClient();
+const draft = await api.captureRegistration(photo);
 const policy = await api.registrationPolicy();
-// 展示 policy.body，明确同意后：
-const registrationKey = crypto.randomUUID();
-const registered = await api.register({
-  temp_id: draft.temp_id, display_name: inputName,
-  recipients: inputRecipients, policy_version: policy.policy_version,
-  consent_result: 'granted',
-}, registrationKey);
-if (!registered.success || !registered.user_id || !registered.user_token) return;
-const verificationKey = crypto.randomUUID();
-const originalToken = registered.user_token;
-const verified = await api.verifyAndNotify(secondImageBase64, registered.user_id, originalToken, verificationKey);
-// 重试上一行保留原照片、originalToken、verificationKey；匹配成功后正常查询使用新令牌。
-if (verified.matched && verified.check_id && verified.user_token) {
-  const result = await api.mailResult(verified.check_id, verified.user_token);
-  // UI显示 recipient_results；未完成时继续间隔查询，完成后结束会话。
+const registered = await api.register({temp_id:draft.temp_id,display_name:name,recipients,
+  consent_result:'granted',policy_version:policy.policy_version});
+if (registered.user_id) {
+  const verified = await api.verifyAndNotify(secondPhoto, registered.user_id);
+  if (verified.matched && verified.send_requested) showSendSuccess();
+}
+const person = await api.identify(photo);
+if (person.matched && person.user_id) {
+  const contacts = await api.confirmRecipients(person.user_id, true);
+  const sent = await api.notifySafety(person.user_id, true, contacts.policy_version!);
+  if (sent.send_requested) showSendSuccess();
 }
 ```
-
-```ts
-const person = await api.identify(imageBase64, crypto.randomUUID());
-if (!person.matched || !person.user_id || !person.user_token) return;
-// 用户点击“是”：
-const contacts = await api.confirmRecipients(person.user_id, true, person.user_token, crypto.randomUUID());
-// 展示 contacts.recipients、consent_body，明确同意后：
-const sendKey = crypto.randomUUID();
-const sent = await api.notifySafety(person.user_id, true, contacts.policy_version!, person.user_token, sendKey);
-if (sent.check_id) await api.mailResult(sent.check_id, person.user_token);
-// 离开页面：
-await api.endSession(person.user_token);
-```
-
-草稿完成前取消用 api.cancelRegistration(temp_id)，资料登记成功后清理当前会话用 api.endSession(user_token)。这些调用也支持固定幂等键。不要把照片、姓名或令牌写入 localStorage。
-
-## 邮件状态与错误
-
-| 字段/值 | 含义与处理 |
-| --- | --- |
-| mail_status=queued/processing | 等待或处理中，继续查结果，不能显示发送成功 |
-| recipient status=queued/sending | 单个收件人等待/发送中 |
-| accepted | 邮件服务商已受理，不保证到达收件箱 |
-| delivered/bounced | 后续回调报告送达/退信；退信需修正联系人，不会自动撤销已完成登记 |
-| partially_accepted | 部分受理；展示逐项状态，登记仍 pending_registration |
-| failed | 明确失败；仅 MAIL-002 且期限内、尝试不足 3 次的失败可请求 retry |
-| unknown | 可能已发送，等待回调/人工核对，不能自动重发 |
-| cancelled | 授权或期限已失效，没有继续发送 |
-
-统一错误：`{ "error": { "code": "...", "message": "...", "request_id": "...", "details": {} } }`，details 可缺省。
-
-| HTTP | 常见 code | 前端处理 |
-| --- | --- | --- |
-| 400 | VALIDATION_ERROR / INVALID_FACE_IMAGE / IDEMPOTENCY_KEY_REQUIRED | 修正字段、图片格式或请求头 |
-| 401 | TERMINAL_AUTH_REQUIRED / TERMINAL_AUTH_FAILED | 检查服务端代理的终端配置 |
-| 401 | USER_SESSION_REQUIRED / USER_SESSION_EXPIRED | 重新验证本人，停止使用旧令牌 |
-| 403 | USER_ID_MISMATCH / IDENTITY_CONFIRMATION_REQUIRED | 使用识别结果的 ID，先确认本人 |
-| 404 | NOT_FOUND | 结果不存在或不属于本次用户/终端 |
-| 409 | POLICY_VERSION_CHANGED | 重新获取文面并重新取得同意 |
-| 409 | IDEMPOTENCY_CONFLICT / SESSION_ALREADY_USED | 不重复创建邮件；保持原请求重试或查询既有 check_id |
-| 410 | TIME-001 | 草稿过期，清理并重新采集 |
-| 422 | FACE-001 / FACE-002 / FACE_QUALITY_FAILED | 重拍；展示 error.details 中可用评分 |
-| 429 | RATE_LIMITED / FACE-004 | 按 retry_after_seconds/Retry-After 等待，不连续重试 |
-| 503 | SERVICE_NOT_CONFIGURED / FACE_SERVICE_UNAVAILABLE / FACE_AUTH_EXPIRED / FACE_ACCESS_DENIED | 服务配置、AWS 资源、身份或权限问题，不降低评分门槛掩盖故障 |
-
-旧 split enrollments、verify-registration、users/me、safety-checks 接口暂时保留兼容，在 OpenAPI 标记 deprecated。新前端只按本文最终接口接入，不混用旧的手动登记发信步骤。

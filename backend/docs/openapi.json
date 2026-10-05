@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "安心安否確認 用户端 API",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "servers": [
     {
@@ -156,7 +156,7 @@
             }
           }
         },
-        "description": "照片为 JPEG/PNG 的纯 Base64，解码后最多 512 KiB；图片模式不检测活体。比对通过自动入队登记通知，并返回 check_id 和新的 user_token。"
+        "description": "照片为 JPEG/PNG 的纯 Base64，解码后最多 512 KiB；图片模式不检测活体。比对通过自动入队登记通知，并返回 check_id 和 send_requested=true。"
       }
     },
     "/v1/registrations": {
@@ -362,11 +362,7 @@
     "/v1/registrations/verify": {
       "post": {
         "summary": "注册④ 比对照片，通过后自动入队登记通知",
-        "security": [
-          {
-            "UserToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -511,7 +507,7 @@
             }
           }
         },
-        "description": "照片为 JPEG/PNG 的纯 Base64，解码后最多 512 KiB；图片模式不检测活体。比对通过自动入队登记通知，并返回 check_id 和新的 user_token。"
+        "description": "照片为 JPEG/PNG 的纯 Base64，解码后最多 512 KiB；图片模式不检测活体。比对通过自动入队登记通知，并返回 check_id 和 send_requested=true。"
       }
     },
     "/v1/registrations/{id}": {
@@ -766,7 +762,13 @@
               "schema": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
-                "properties": {},
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  }
+                },
                 "additionalProperties": false
               }
             }
@@ -777,11 +779,7 @@
     "/v1/users/{id}/recipients": {
       "post": {
         "summary": "安否② 确认本人并返回联系人和发送同意文面",
-        "security": [
-          {
-            "UserToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "id",
@@ -931,11 +929,7 @@
     "/v1/safety-notifications": {
       "post": {
         "summary": "安否③ 同意并发送安否通知",
-        "security": [
-          {
-            "UserToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -961,7 +955,7 @@
             }
           },
           "202": {
-            "description": "操作已入队；轮询结果，queued 不代表已发送",
+            "description": "发送请求已接受；用户端显示提交成功，不查询收件状态",
             "content": {
               "application/json": {
                 "schema": {
@@ -1098,11 +1092,7 @@
     "/v1/mail-results/{id}": {
       "get": {
         "summary": "注册⑤／安否 只读查询邮件结果",
-        "security": [
-          {
-            "UserToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "id",
@@ -1215,17 +1205,15 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true,
+        "description": "后端诊断保留接口。用户端不调用；管理端之后单独对接。"
       }
     },
     "/v1/mail-results/{id}/retry": {
       "post": {
         "summary": "重试允许重试的失败收件人",
-        "security": [
-          {
-            "UserToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "id",
@@ -1250,7 +1238,7 @@
         ],
         "responses": {
           "202": {
-            "description": "操作已入队；轮询结果，queued 不代表已发送",
+            "description": "发送请求已接受；用户端显示提交成功，不查询收件状态",
             "content": {
               "application/json": {
                 "schema": {
@@ -1357,12 +1345,20 @@
               "schema": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
-                "properties": {},
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  }
+                },
                 "additionalProperties": false
               }
             }
           }
-        }
+        },
+        "deprecated": true,
+        "description": "后端诊断保留接口。用户端不调用；管理端之后单独对接。"
       }
     },
     "/health/live": {
@@ -1940,7 +1936,13 @@
               "schema": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
-                "properties": {},
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  }
+                },
                 "additionalProperties": false
               }
             }
@@ -2202,7 +2204,13 @@
               "schema": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
-                "properties": {},
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  }
+                },
                 "additionalProperties": false
               }
             }
@@ -2506,6 +2514,11 @@
                         "type": "string",
                         "format": "uuid",
                         "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "user_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                       }
                     },
                     "required": [
@@ -2516,6 +2529,11 @@
                   {
                     "type": "object",
                     "properties": {
+                      "user_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
                       "image_base64": {
                         "type": "string",
                         "minLength": 4,
@@ -3007,7 +3025,13 @@
               "schema": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
-                "properties": {},
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  }
+                },
                 "additionalProperties": false
               }
             }
@@ -3155,6 +3179,11 @@
                     "type": "string",
                     "format": "uuid",
                     "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "user_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                   }
                 },
                 "required": [
@@ -3165,17 +3194,13 @@
             }
           }
         },
-        "description": "purpose=registration 时必须带 registration 用户令牌；enrollment 时须提供 enrollment_id。AWS Face Liveness 视频使用专用前端组件直接提交。"
+        "description": "purpose=registration 时必须提供 user_id；enrollment 时须提供 enrollment_id。AWS Face Liveness 视频使用专用前端组件直接提交。"
       }
     },
     "/v1/faces/verify-registration": {
       "post": {
         "summary": "登记后重新核验脸部",
-        "security": [
-          {
-            "UserToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -3305,6 +3330,11 @@
                         "type": "string",
                         "format": "uuid",
                         "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "user_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                       }
                     },
                     "required": [
@@ -3315,6 +3345,11 @@
                   {
                     "type": "object",
                     "properties": {
+                      "user_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
                       "image_base64": {
                         "type": "string",
                         "minLength": 4,
@@ -3469,6 +3504,11 @@
                         "type": "string",
                         "format": "uuid",
                         "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "user_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                       }
                     },
                     "required": [
@@ -3479,6 +3519,11 @@
                   {
                     "type": "object",
                     "properties": {
+                      "user_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
                       "image_base64": {
                         "type": "string",
                         "minLength": 4,
@@ -3502,11 +3547,7 @@
     "/v1/users/me/confirmation": {
       "post": {
         "summary": "确认或拒绝本人姓名",
-        "security": [
-          {
-            "UserToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -3630,11 +3671,17 @@
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
                 "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
                   "confirmed": {
                     "type": "boolean"
                   }
                 },
                 "required": [
+                  "user_id",
                   "confirmed"
                 ],
                 "additionalProperties": false
@@ -3648,11 +3695,7 @@
     "/v1/users/me/recipients": {
       "get": {
         "summary": "读取联系人姓名与掩码邮箱",
-        "security": [
-          {
-            "UserToken": []
-          }
-        ],
+        "security": [],
         "parameters": [],
         "responses": {
           "200": {
@@ -3762,11 +3805,7 @@
     "/v1/enrollments/{id}/confirmation-mails": {
       "post": {
         "summary": "开始发送登记确认邮件",
-        "security": [
-          {
-            "UserToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "id",
@@ -3791,146 +3830,7 @@
         ],
         "responses": {
           "202": {
-            "description": "操作已入队；轮询结果，queued 不代表已发送",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "参阅接口文档中的错误码",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "参阅接口文档中的错误码",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "参阅接口文档中的错误码",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "参阅接口文档中的错误码",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "参阅接口文档中的错误码",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "410": {
-            "description": "参阅接口文档中的错误码",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "参阅接口文档中的错误码",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "参阅接口文档中的错误码",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "参阅接口文档中的错误码",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "object",
-                "properties": {},
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/v1/safety-checks": {
-      "post": {
-        "summary": "本次同意并开始安否邮件发送",
-        "security": [
-          {
-            "UserToken": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "pattern": "^[A-Za-z0-9_.:-]+$"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "操作已入队；轮询结果，queued 不代表已发送",
+            "description": "发送请求已接受；用户端显示提交成功，不查询收件状态",
             "content": {
               "application/json": {
                 "schema": {
@@ -4038,6 +3938,152 @@
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
                 "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/v1/safety-checks": {
+      "post": {
+        "summary": "本次同意并开始安否邮件发送",
+        "security": [],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "发送请求已接受；用户端显示提交成功，不查询收件状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参阅接口文档中的错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "参阅接口文档中的错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "参阅接口文档中的错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "参阅接口文档中的错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "参阅接口文档中的错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "参阅接口文档中的错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "参阅接口文档中的错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "参阅接口文档中的错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "参阅接口文档中的错误码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
                   "policy_version": {
                     "type": "string",
                     "minLength": 1,
@@ -4049,6 +4095,7 @@
                   }
                 },
                 "required": [
+                  "user_id",
                   "policy_version",
                   "consent"
                 ],
@@ -4063,11 +4110,7 @@
     "/v1/safety-checks/{id}": {
       "get": {
         "summary": "查询宛先逐项配信状态",
-        "security": [
-          {
-            "UserToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "id",
@@ -4187,11 +4230,7 @@
     "/v1/safety-checks/{id}/retry": {
       "post": {
         "summary": "只重试符合条件的失败宛先",
-        "security": [
-          {
-            "UserToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "id",
@@ -4216,7 +4255,7 @@
         ],
         "responses": {
           "202": {
-            "description": "操作已入队；轮询结果，queued 不代表已发送",
+            "description": "发送请求已接受；用户端显示提交成功，不查询收件状态",
             "content": {
               "application/json": {
                 "schema": {
@@ -4323,7 +4362,13 @@
               "schema": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
-                "properties": {},
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  }
+                },
                 "additionalProperties": false
               }
             }
@@ -4335,11 +4380,7 @@
     "/v1/sessions/current": {
       "delete": {
         "summary": "结束当前用户会话",
-        "security": [
-          {
-            "UserToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -4462,7 +4503,13 @@
               "schema": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
-                "properties": {},
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  }
+                },
                 "additionalProperties": false
               }
             }
@@ -4575,13 +4622,7 @@
     }
   },
   "components": {
-    "securitySchemes": {
-      "UserToken": {
-        "type": "http",
-        "scheme": "bearer",
-        "description": "短期不透明用户令牌"
-      }
-    },
+    "securitySchemes": {},
     "schemas": {
       "Metrics": {
         "type": "object",
@@ -4723,13 +4764,6 @@
       "RegistrationResult": {
         "type": "object",
         "properties": {
-          "user_token": {
-            "type": "string"
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
-          },
           "success": {
             "type": "boolean"
           },
@@ -4767,32 +4801,19 @@
       "FaceResult": {
         "type": "object",
         "properties": {
-          "user_token": {
-            "type": "string"
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "check_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "mail_status": {
-            "type": "string"
-          },
-          "recipient_results": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RecipientResult"
-            }
-          },
           "user_id": {
             "type": "string",
             "format": "uuid"
           },
           "user_status": {
             "type": "string"
+          },
+          "check_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "send_requested": {
+            "type": "boolean"
           },
           "registration_completed": {
             "type": "boolean"
@@ -4898,6 +4919,16 @@
       "SendResult": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "send_requested": {
+            "type": "boolean"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "check_id": {
             "type": [
               "string",
@@ -4905,36 +4936,15 @@
             ],
             "format": "uuid"
           },
-          "mail_status": {
-            "type": "string"
-          },
-          "recipient_results": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RecipientResult"
-            }
-          },
-          "user_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "user_status": {
-            "type": "string"
-          },
-          "registration_completed": {
-            "type": "boolean"
-          },
-          "status": {
-            "type": "string"
-          },
           "session_ended": {
             "type": "boolean"
           }
         },
         "required": [
+          "success",
+          "send_requested",
           "check_id",
-          "mail_status",
-          "recipient_results"
+          "user_id"
         ]
       },
       "MailResult": {

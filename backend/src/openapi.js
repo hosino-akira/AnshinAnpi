@@ -43,28 +43,29 @@ export function openApiDocument() {
     if (path.includes('{id}')) parameters.push({ name:'id',in:'path',required:true,schema:{ type:'string',format:'uuid' } });
     if (method !== 'get' && !publicRoute) parameters.push({ name:'Idempotency-Key',in:'header',required:true,schema:{ type:'string',minLength:1,maxLength:128,pattern:'^[A-Za-z0-9_.:-]+$' } });
     if (path==='/v1/consent-policies') parameters.push({ name:'type',in:'query',required:true,schema:{ type:'string',enum:['registration','safety'] } });
-    const security = bearer ? [{ UserToken:[] }] : [];
+    const security = [];
     const responseName = {
       '/v1/registrations/capture':'CaptureResult','/v1/registrations':'RegistrationResult',
       '/v1/registrations/verify':'FaceResult','/v1/faces/identify':'FaceResult',
       '/v1/users/{id}/recipients':'ContactsResult','/v1/safety-notifications':'SendResult',
       '/v1/mail-results/{id}':'MailResult','/v1/consent-policies':'Policy'
     }[path];
-    const responses = { [status]: { description: status===202 ? '操作已入队；轮询结果，queued 不代表已发送' : '成功',
+    const responses = { [status]: { description: status===202 ? '发送请求已接受；用户端显示提交成功，不查询收件状态' : '成功',
       ...(status!==204 ? { content:{ 'application/json':{ schema:responseName ? { $ref:`#/components/schemas/${responseName}` } : {type:'object'} } } } : {}) } };
     if (['/v1/registrations','/v1/safety-notifications'].includes(path)) responses[200]={description:'用户拒绝同意，不创建邮件请求',content:{'application/json':{schema:{$ref:`#/components/schemas/${responseName}`}}}};
     for (const error of [400,401,403,404,409,410,422,429,503]) responses[error]={ description:'参阅接口文档中的错误码',content:{ 'application/json':{ schema:{ $ref:'#/components/schemas/Error' } } } };
     paths[path] ??= {};
     paths[path][method]={ summary,security,parameters,responses,
       ...(body ? { requestBody:{ required:true,content:{ 'application/json':{ schema:z.toJSONSchema(bodySchemas[body],{ io:'input',unrepresentable:'any' }) } } } } : {}) };
+    if (path.startsWith('/v1/mail-results')) { paths[path][method].deprecated=true; paths[path][method].description='后端诊断保留接口。用户端不调用；管理端之后单独对接。'; }
     if (path.startsWith('/v1/enrollments') || path.startsWith('/v1/safety-checks') || path.startsWith('/v1/users/me') || path==='/v1/faces/verify-registration') paths[path][method].deprecated=true;
-    if (['photoCapture','registrationVerification'].includes(body)) paths[path][method].description='照片为 JPEG/PNG 的纯 Base64，解码后最多 512 KiB；图片模式不检测活体。比对通过自动入队登记通知，并返回 check_id 和新的 user_token。';
-    if (path==='/v1/faces/liveness-sessions') paths[path][method].description='purpose=registration 时必须带 registration 用户令牌；enrollment 时须提供 enrollment_id。AWS Face Liveness 视频使用专用前端组件直接提交。';
+    if (['photoCapture','registrationVerification'].includes(body)) paths[path][method].description='照片为 JPEG/PNG 的纯 Base64，解码后最多 512 KiB；图片模式不检测活体。比对通过自动入队登记通知，并返回 check_id 和 send_requested=true。';
+    if (path==='/v1/faces/liveness-sessions') paths[path][method].description='purpose=registration 时必须提供 user_id；enrollment 时须提供 enrollment_id。AWS Face Liveness 视频使用专用前端组件直接提交。';
     if (body==='face') paths[path][method].description='二选一：image_base64（JPEG/PNG，解码后不超过512 KiB，不含 data URL 前缀）或 liveness_session_id。图片模式不检测活体。返回 metrics，分数为0–100；无可用候选时 similarity_score 为 null。登记接口仅返回图片质量指标。';
     if (path.endsWith('/webhooks')) paths[path][method].description='SNS 签名、Topic ARN、时间窗口和事件 ID 均由后端校验，不接受未签名客户端配信状态。';
   }
-  return { openapi:'3.1.0',info:{ title:'安心安否確認 用户端 API',version:'0.3.0' },servers:[{ url:'http://192.168.0.51:3002',description:'局域网开发后端（地址可能随 DHCP 改变）' },{url:'http://localhost:3002'}],paths,
-    components:{ securitySchemes:{ UserToken:{ type:'http',scheme:'bearer',description:'短期不透明用户令牌' } },
+  return { openapi:'3.1.0',info:{ title:'安心安否確認 用户端 API',version:'0.4.0' },servers:[{ url:'http://192.168.0.51:3002',description:'局域网开发后端（地址可能随 DHCP 改变）' },{url:'http://localhost:3002'}],paths,
+    components:{ securitySchemes:{},
     schemas:{ ...responseSchemas(), Error:{ type:'object',required:['error'],properties:{ error:{ type:'object',required:['code','message','request_id'],
       properties:{ code:{ type:'string' },message:{ type:'string' },request_id:{ type:'string',format:'uuid' },details:{ type:'object' } } } } } } } };
 }
@@ -74,17 +75,17 @@ function responseSchemas() {
   const object=(properties,required=[])=>({type:'object',properties,required});
   const recipients={type:'array',items:{$ref:'#/components/schemas/RecipientResult'}};
   const metrics={$ref:'#/components/schemas/Metrics'};
-  const session={user_token:text,expires_at:{type:'string',format:'date-time'}};
+  const session={expires_at:{type:'string',format:'date-time'}};
   const mail={check_id:uuid,mail_status:text,recipient_results:recipients,user_id:uuid,user_status:text,registration_completed:flag};
   return {
     Metrics:object({similarity_score:nullableScore,match_threshold:nullableScore,face_confidence:nullableScore,brightness:nullableScore,sharpness:nullableScore,liveness_passed:flag,liveness_score:nullableScore},['liveness_passed']),
     RecipientResult:object({delivery_id:uuid,recipient_id:uuid,status:text,error_code:{type:['string','null']},attempt_count:{type:'integer'}},['delivery_id','recipient_id','status']),
     Policy:object({policy_version:text,title:text,body:text},['policy_version','title','body']),
     CaptureResult:object({temp_id:uuid,face_valid:flag,expires_at:session.expires_at,idle_timeout_seconds:{type:'integer'},metrics},['temp_id','face_valid','expires_at','idle_timeout_seconds','metrics']),
-    RegistrationResult:object({...session,success:flag,user_id:{type:['string','null'],format:'uuid'},user_status:{type:['string','null'],enum:['pending_registration',null]},registration_completed:flag,status:text},['success','user_id','user_status','registration_completed']),
-    FaceResult:object({...session,...mail,matched:flag,result:{type:'string',enum:['matched','no_match','ambiguous']},display_name:text,metrics,similarity_score:nullableScore,verification_status:text,attempts_remaining:{type:'integer'},recovered:flag},['matched','result','metrics','verification_status']),
+    RegistrationResult:object({success:flag,user_id:{type:['string','null'],format:'uuid'},user_status:{type:['string','null'],enum:['pending_registration',null]},registration_completed:flag,status:text},['success','user_id','user_status','registration_completed']),
+    FaceResult:object({user_id:uuid,user_status:text,check_id:uuid,send_requested:flag,registration_completed:flag,matched:flag,result:{type:'string',enum:['matched','no_match','ambiguous']},display_name:text,metrics,similarity_score:nullableScore,verification_status:text,attempts_remaining:{type:'integer'},recovered:flag},['matched','result','metrics','verification_status']),
     ContactsResult:object({success:flag,confirmed:flag,user_id:uuid,policy_version:text,consent_body:text,session_ended:flag,recipients:{type:'array',items:object({recipient_id:uuid,name:text,masked_email:text,status:text},['recipient_id','name','masked_email','status'])}},['success','confirmed','recipients']),
-    SendResult:object({...mail,check_id:{type:['string','null'],format:'uuid'},status:text,session_ended:flag},['check_id','mail_status','recipient_results']),
+    SendResult:object({success:flag,send_requested:flag,user_id:uuid,check_id:{type:['string','null'],format:'uuid'},session_ended:flag},['success','send_requested','check_id','user_id']),
     MailResult:object({...mail,type:{type:'string',enum:['registration','safety']},status:text,created_at:session.expires_at,completed_at:{type:['string','null'],format:'date-time'}},['check_id','type','mail_status','user_id','user_status','registration_completed','recipient_results'])
   };
 }

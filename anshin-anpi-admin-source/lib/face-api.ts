@@ -3,16 +3,17 @@ export class FaceApiError extends Error {
     public details?: Record<string, unknown>) { super(code); }
 }
 
-// The development proxy attaches terminal authentication on the server.
-export async function faceApi<T>(path: string, method = 'GET', body?: unknown, userToken?: string,
+// The single robot uses user IDs; no device or user secrets are attached.
+export async function faceApi<T>(path: string, method = 'GET', body?: unknown, userId?: string,
   options: { baseUrl?: string; idempotencyKey?: string } = {}): Promise<T> {
-  const response = await fetch(`${(options.baseUrl ?? '/api/terminal').replace(/\/$/, '')}${path}`, {
+  const target = `${(options.baseUrl ?? '/api/terminal').replace(/\/$/, '')}${path}`;
+  const url = method === 'GET' && userId ? `${target}${target.includes('?') ? '&' : '?'}user_id=${encodeURIComponent(userId)}` : target;
+  const response = await fetch(url, {
     method, cache: 'no-store', signal: AbortSignal.timeout(30000),
     headers: { 'Content-Type': 'application/json',
       ...(method !== 'GET' ? { 'Idempotency-Key': options.idempotencyKey ?? crypto.randomUUID() } : {}),
-      ...(userToken ? { Authorization: `Bearer ${userToken}` } : {}),
     },
-    body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
+    body: method === 'GET' ? undefined : JSON.stringify(userId && !path.match(/\/users\/[^/]+\/recipients$/) ? { ...(body as Record<string, unknown> ?? {}), user_id: userId } : body ?? {}),
   });
   const result: unknown = await response.json();
   if (!response.ok) {

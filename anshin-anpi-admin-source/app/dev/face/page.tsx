@@ -2,11 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { faceApi, FaceApiError } from '@/lib/face-api';
-import { createFaceClient, type MailResult } from '@/lib/face-client';
+import { createFaceClient } from '@/lib/face-client';
 import './face.css';
 
 type Policy = { policy_version: string; body: string };
-type Session = { user_token: string; expires_at: string; user_id: string };
+type Session = { user_id: string };
 type Metrics = { similarity_score?: number | null; match_threshold?: number;
   face_confidence?: number | null; brightness?: number | null; sharpness?: number | null;
   liveness_score?: number | null };
@@ -52,7 +52,6 @@ export default function FaceDevelopmentPage() {
   const [error, setError] = useState('');
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [checkId, setCheckId] = useState<string>();
-  const [mailResult, setMailResult] = useState<MailResult>();
   const [safetyContacts, setSafetyContacts] = useState<Awaited<ReturnType<typeof faceClient.confirmRecipients>>>();
   const [safetyConsent, setSafetyConsent] = useState(false);
   const [identified, setIdentified] = useState(false);
@@ -75,22 +74,9 @@ export default function FaceDevelopmentPage() {
     return () => {
       active = false; readVersion.current++;
       if (draftId.current) void faceClient.cancelRegistration(draftId.current).catch(() => {});
-      if (session.current) void faceApi('/sessions/current', 'DELETE', {}, session.current.user_token).catch(() => {});
+      if (session.current) void faceApi('/sessions/current', 'DELETE', {}, session.current.user_id).catch(() => {});
     };
   }, []);
-
-  useEffect(() => {
-    const current = session.current;
-    if (!current) return;
-    const timeout = Math.max(0, Math.min(Date.parse(current.expires_at) - Date.now(), message.startsWith('匹配成功：') ? 90000 : 180000));
-    const timer = setTimeout(() => {
-      if (session.current !== current) return;
-      session.current = undefined;
-      void faceApi('/sessions/current', 'DELETE', {}, current.user_token).catch(() => {});
-      setMessage('本人验证会话已结束，请结束操作后重新开始。');
-    }, timeout);
-    return () => clearTimeout(timer);
-  }, [message]);
 
   const clearPhoto = () => { setPhoto(undefined); readVersion.current++; if (fileInput.current) fileInput.current.value = ''; };
   const failure = (cause: unknown) => {
@@ -99,8 +85,7 @@ export default function FaceDevelopmentPage() {
         'FACE-001': '图片中没有检测到人脸。', 'FACE-002': '请上传只有一张人脸的照片。',
         FACE_QUALITY_FAILED: '照片未通过质量检查，请检查清晰度、光线和脸部角度。',
         INVALID_FACE_IMAGE: '后端只接受 512 KiB 以下的 JPEG 或 PNG 图片。',
-        USER_SESSION_EXPIRED: '验证会话已过期，请结束本次操作后重新开始。',
-        USER_SESSION_REQUIRED: '请先重新登记或验证本人。',
+        FACE_VERIFICATION_REQUIRED: '验证会话已过期，请结束本次操作后重新开始。',
         'TIME-001': '临时登记已过期，请重新开始。',
         FACE_SERVICE_UNAVAILABLE: 'AWS 人脸服务暂时不可用。',
         FACE_AUTH_EXPIRED: '本机 AWS 登录已过期，请重新登录后重启后端。',
@@ -130,21 +115,21 @@ export default function FaceDevelopmentPage() {
         draftId.current = draft.temp_id;
         const completed = await faceClient.register({ temp_id: draft.temp_id, display_name: displayName,
           policy_version: policy!.policy_version, consent_result: 'granted', recipients: [{ name: contactName, email: contactEmail }] });
-        if (!completed.user_id || !completed.user_token || !completed.expires_at) throw new Error('登记未完成。');
-        session.current = { user_id: completed.user_id, user_token: completed.user_token, expires_at: completed.expires_at };
-        draftId.current = undefined; setRegistered(true); setIdentified(false); setCheckId(undefined); setMailResult(undefined);
+        if (!completed.user_id) throw new Error('登记未完成。');
+        session.current = { user_id: completed.user_id };
+        draftId.current = undefined; setRegistered(true); setIdentified(false); setCheckId(undefined);
         addResult('资料保存成功，待二次验证', draft.metrics); setDisplayName(''); setContactName(''); setContactEmail('');
-        setMessage('照片已登记。用户仍待邮件激活；三分钟内可上传另一张照片验证刚登记的人脸。');
+        setMessage('照片已登记。请上传另一张照片验证刚登记的人脸。');
       } else {
         const result = purpose === 'registration'
-          ? await faceClient.verifyAndNotify(photo, session.current?.user_id ?? '', session.current?.user_token ?? '')
+          ? await faceClient.verifyAndNotify(photo, session.current?.user_id ?? '')
           : await faceClient.identify(photo);
         addResult(result.result === 'matched' ? '匹配成功' : result.result === 'ambiguous' ? '候选相近，无法确认' : '未匹配', result.metrics);
-        if (result.result === 'matched' && result.user_id && result.user_token && result.expires_at) {
-          session.current = { user_id: result.user_id, user_token: result.user_token, expires_at: result.expires_at };
-          setCheckId(result.check_id); setMailResult(undefined); setSafetyContacts(undefined); setSafetyConsent(false);
+        if (result.result === 'matched' && result.user_id) {
+          session.current = { user_id: result.user_id };
+          setCheckId(result.check_id); setSafetyContacts(undefined); setSafetyConsent(false);
           setIdentified(purpose === 'safety');
-          setMessage(`匹配成功：${result.display_name ?? '本人'}。相似度 ${score(result.metrics.similarity_score)} 分。${result.check_id ? '登记通知已入队，请查询邮件结果。' : '请确认是本人后获取联系人。'}`);
+          setMessage(`匹配成功：${result.display_name ?? '本人'}。相似度 ${score(result.metrics.similarity_score)} 分。${result.check_id ? '登记通知提交成功。' : '请确认是本人后获取联系人。'}`);
         } else setMessage('未能确认本人，请查看评分。日常识别只匹配已激活用户。');
       }
     } catch (cause) { failure(cause); setMessage('本次操作未完成。'); }
@@ -160,31 +145,28 @@ export default function FaceDevelopmentPage() {
         catch (cause) { if (!(cause instanceof FaceApiError && cause.status === 410)) throw cause; }
       }
       if (session.current) {
-        try { await faceApi('/sessions/current', 'DELETE', {}, session.current.user_token); }
+        try { await faceApi('/sessions/current', 'DELETE', {}, session.current.user_id); }
         catch (cause) { if (!(cause instanceof FaceApiError && cause.status === 401)) throw cause; }
       }
       draftId.current = undefined; session.current = undefined;
       setRegistered(false); clearPhoto(); setDisplayName(''); setContactName(''); setContactEmail('');
-      setCheckId(undefined); setMailResult(undefined); setSafetyContacts(undefined); setSafetyConsent(false); setIdentified(false);
+      setCheckId(undefined); setSafetyContacts(undefined); setSafetyConsent(false); setIdentified(false);
       setConsent(false); setAttempts([]); setError(''); setMessage('已结束操作。');
     } catch (cause) { failure(cause); } finally { pending.current = false; setBusy(false); }
   };
 
-  const runMail = async (action: 'contacts' | 'send' | 'query') => {
+  const runMail = async (action: 'contacts' | 'send') => {
     const current = session.current;
     if (!current || pending.current) return;
     pending.current = true; setBusy(true); setError('');
     try {
-      if (action === 'contacts') setSafetyContacts(await faceClient.confirmRecipients(current.user_id, true, current.user_token));
+      if (action === 'contacts') setSafetyContacts(await faceClient.confirmRecipients(current.user_id, true));
       if (action === 'send' && safetyConsent && safetyContacts?.policy_version) {
-        const result = await faceClient.notifySafety(current.user_id, true, safetyContacts.policy_version, current.user_token);
-        setCheckId(result.check_id ?? undefined); setMessage('安否通知已入队，请查询邮件结果。');
+        const result = await faceClient.notifySafety(current.user_id, true, safetyContacts.policy_version);
+        setCheckId(result.check_id ?? undefined); setMessage('发送成功，安否通知请求已提交。');
       }
-      if (action === 'query' && checkId) {
-        const result = await faceClient.mailResult(checkId, current.user_token); setMailResult(result);
-        setMessage(result.registration_completed ? '登记已完成，用户已激活。' : `邮件处理状态：${result.mail_status}。`);
-      }
-    } catch (cause) { failure(cause); }
+
+    } catch (cause) { if (action === 'send') { setError(''); setMessage('操作已结束。'); } else failure(cause); }
     finally { pending.current = false; setBusy(false); }
   };
 
@@ -228,11 +210,7 @@ export default function FaceDevelopmentPage() {
         <label><input type="checkbox" checked={safetyConsent} onChange={e => setSafetyConsent(e.target.checked)}/>我同意向以上联系人发送本次安否通知</label>
         <button disabled={busy || !safetyConsent} onClick={() => void runMail('send')}>同意并发送安否邮件</button></>}
     </section>}
-    {checkId && <section className="face-card"><h2>邮件结果</h2><p>记录 ID：{checkId}</p>
-      <button disabled={busy} onClick={() => void runMail('query')}>查询邮件结果（不会重新发送）</button>
-      {mailResult && <><p>状态：{mailResult.mail_status}；用户状态：{mailResult.user_status}；登记完成：{mailResult.registration_completed ? '是' : '否'}</p>
-        <ul>{mailResult.recipient_results.map(item => <li key={item.delivery_id}>{item.recipient_id}：{item.status}{item.error_code ? `（${item.error_code}）` : ''}</li>)}</ul></>}
-    </section>}
+    {checkId && <section className="face-card"><h2>发送成功</h2><p>发送请求已提交。</p></section>}
     {attempts.length > 0 && <section className="face-card"><h2>最近检测评分</h2>{attempts.map((attempt, index) =>
       <article key={`${attempt.time}-${index}`}><h3>{attempt.time} · {attempt.result}</h3>
         <p>人脸相似度：{score(attempt.metrics.similarity_score)}

@@ -39,7 +39,7 @@ AWS 资源尚未配置时，普通数据与文面接口可以调用；需要识�
 
 最终流程及可复制请求见 [前端调用交接](docs/FRONTEND_FACE_HANDOFF.md)。主机联调地址为 `http://192.168.0.51:3002`，当前工作树的 Node API 使用 3002；上面的 Docker 启动端口依实际配置。新版登记使用 capture → 一次 register → verify 自动入队登记通知 → GET mail-results。全部邮件受理后才激活用户。安否使用 identify → 本人确认并获取遮蔽联系人 → safety-notifications → GET mail-results。旧拆分接口保留兼容，OpenAPI 已标记弃用。
 
-当前为单机器人模式，业务接口不再要求或使用 `X-Terminal-Id`、`X-Terminal-Token`。任何能够访问 API 的客户端均归属固定机器人，设备身份不再验证。识别成功后返回短期 `user_token`，后续本人操作使用 `Authorization: Bearer ...`，服务端校验所属终端、用户状态、用途、本人确认和超时。POST、PATCH、PUT、DELETE 必须提供 `Idempotency-Key`；邮件回调除外。
+当前为单机器人模式，业务接口不再要求或使用 `X-Terminal-Id`、`X-Terminal-Token`。任何能够访问 API 的客户端均归属固定机器人，设备身份不再验证。注册或识别成功后返回 user_id，后续直接传该 ID，不使用 Authorization 或用户令牌。后端保留人脸验证记录、本人确认和有效期。POST、PATCH、PUT、DELETE 必须提供 `Idempotency-Key`；邮件回调除外。
 
 发送接口返回 `202 queued`，前端轮询发送结果。`queued`/`sending` 不是成功；`accepted` 才表示服务商已接受。`unknown` 表示外部请求可能已成功，需要回调或工作人员核对，不能自动重发。
 
@@ -108,3 +108,5 @@ npm test
 本次完成用户端 API、邮件队列消费、AWS 适配、数据库迁移与接口文档。本地 React 主页面及 `/dev/face` 已接入图片登记和识别，邮件界面尚未完成正式联调。管理端 API、正式认证服务、部署至 AWS、个人数据保留期限的定期物理删除、备份轮转和生产同意文面审批不属于本次用户接口实现。
 
 数据库按式样书第 10.1 节收敛为 8 张业务表，见 [数据库说明](../database/README.md)。同意文面及版本存放在 `config/consent-policies.json`。无需安装 Redis 或配置 Redis 密码。
+
+用户端接受发送请求后只显示提交成功，不轮询投递结果。邮件实际处理状态保留在后端，管理端之后单独对接。

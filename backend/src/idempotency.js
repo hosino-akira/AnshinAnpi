@@ -5,8 +5,7 @@ export async function idempotent(deps, request, reply, action, recover = null) {
   const key = request.headers['idempotency-key'];
   if (typeof key !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(key)) fail(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Idempotency-Keyが必要です。');
   const operation = `${request.method} ${request.routeOptions.url}`;
-  const hash = sha256(canonical({ operation, params: request.params ?? {}, body: request.body ?? {},
-    session: request.headers.authorization ? sha256(request.headers.authorization).toString('hex') : null }));
+  const hash = sha256(canonical({ operation, params: request.params ?? {}, body: request.body ?? {}, query: request.query ?? {} }));
   const db = await deps.pool.connect();
   const ctx = { db, hash, key, commits: [], rollbacks: [] };
   let committed = false; let locked = false;
@@ -33,8 +32,7 @@ export async function idempotent(deps, request, reply, action, recover = null) {
       reply.header('Idempotency-Replayed','true');
       if (recover) result=await recover(send,ctx);
       else {
-        const rows=(await db.query('SELECT delivery_id,recipient_id,status FROM mail_deliveries WHERE check_id=$1 ORDER BY recipient_order_no',[send.check_id])).rows;
-        result={status:202,body:{check_id:send.check_id,status:send.status,mail_status:send.status,user_id:send.user_id,recipient_results:rows}};
+        result={status:202,body:{success:true,send_requested:true,check_id:send.check_id,user_id:send.user_id}};
       }
     } else result=await action(ctx);
     const {body,status=200}=result;

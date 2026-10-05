@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { token, sha256 } from './crypto.js';
 import { fail, unavailable } from './errors.js';
 import { audit } from './audit.js';
 import { transaction } from './db.js';
@@ -20,9 +19,16 @@ export class UserService {
     return draft;
   }
   async session(request, db, purpose, { confirmed = false } = {}) {
-    const bearer = request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
-    if (!bearer) fail(401, 'USER_SESSION_REQUIRED', '顔を確認してから操作してください。');
-    const hash = sha256(bearer).toString('hex');
+    let userId = request.body?.user_id ?? request.query?.user_id;
+    const path = request.routeOptions.url;
+    if (path.startsWith('/v1/users/:id/')) userId = request.params.id;
+    if (!userId && path.includes('confirmation-mails'))
+      userId = (await db.query('SELECT user_id FROM users WHERE temp_id=$1', [request.params.id])).rows[0]?.user_id;
+    if (!userId && (path.includes('mail-results/') || path.includes('safety-checks/')))
+      userId = (await db.query('SELECT user_id FROM safety_checks WHERE check_id=$1', [request.params.id])).rows[0]?.user_id;
+    if (typeof userId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId))
+      fail(400, 'USER_ID_REQUIRED', '利用者IDを指定してください。');
+    const hash = userId;
     let row = await this.store.get('session', hash);
     // Serialize mutations for one user through the existing user row.
     const user = row && (await db.query('SELECT status FROM users WHERE user_id=$1 FOR UPDATE', [row.user_id])).rows[0];
@@ -32,26 +38,26 @@ export class UserService {
       || Date.now() - Date.parse(row.last_activity_at) > this.config.idleTtlSeconds * 1000
       || (purpose && row.purpose !== purpose)
       || !['active','pending_registration'].includes(user.status)
-      || (row.purpose === 'safety' && user.status !== 'active')) fail(401, 'USER_SESSION_EXPIRED', 'もう一度、顔を確認してください。');
+      || (row.purpose === 'safety' && user.status !== 'active')) fail(409, 'FACE_VERIFICATION_REQUIRED', 'もう一度、顔を確認してください。');
     if (confirmed && !row.confirmed_at) fail(403, 'IDENTITY_CONFIRMATION_REQUIRED', 'ご本人のお名前をご確認ください。');
-    row.token_hash = hash; row.user_status = user.status;
+    row.user_id = hash; row.user_status = user.status;
     await this.updateSession(row, { last_activity_at: new Date().toISOString() });
     return row;
   }
   async updateSession(session, changes, ctx = null) {
     Object.assign(session, changes);
-    const save = () => this.store.put('session', session.token_hash, session, session.expires_at);
+    const save = () => this.store.put('session', session.user_id, session, session.expires_at);
     if (ctx) ctx.commits.push(save); else await save();
   }
   async newSession(db, request, userId, purpose, verification = null, ctx = null, returnSession = false) {
-    const raw = token(); const expiresAt = new Date(Date.now() + this.config.verificationTtlSeconds * 1000).toISOString();
-    const session = { session_id: randomUUID(), token_hash: sha256(raw).toString('hex'),
+    const expiresAt = new Date(Date.now() + this.config.verificationTtlSeconds * 1000).toISOString();
+    const session = { session_id: randomUUID(),
       terminal_id: request.terminal.terminal_id, user_id: userId, purpose,
       verification_id: verification?.verification_id ?? null, verified_at: verification?.verified_at ?? null,
       authentication_method: verification?.authentication_method ?? null, liveness_passed: verification?.liveness_passed ?? null,
       expires_at: expiresAt, last_activity_at: new Date().toISOString() };
     await this.updateSession(session, {}, ctx);
-    const credentials={user_token:raw,expires_at:expiresAt};
+    const credentials={user_id:userId};
     return returnSession ? {credentials,session} : credentials;
   }
   async createDraft(request, ctx) {
@@ -293,8 +299,7 @@ export class UserService {
     const userStatus=(await ctx.db.query('SELECT status FROM users WHERE user_id=$1',[userId])).rows[0].status;
     return {body:{matched:true,result:'matched',verification_status:'verified',user_id:userId,user_status:userStatus,
       similarity_score:metrics.similarity_score,metrics,display_name:await this.cipher.open(user.display_name,'user-name'),...credentials,
-      ...(notification ? {check_id:notification.body.check_id,mail_status:notification.body.status,
-        recipient_results:notification.body.recipient_results,registration_completed:false} : {})}};
+      ...(notification ? {check_id:notification.body.check_id,send_requested:true,registration_completed:false} : {})}};
   }
   async confirmIdentity(request, body, ctx) {
     const session = await this.session(request, ctx.db);
@@ -351,16 +356,14 @@ export class UserService {
     const check = (await ctx.db.query(`INSERT INTO safety_checks(user_id,terminal_id,check_type,verified_at,consent_id,idempotency_key,request_sha256,expires_at)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING check_id`, [user.user_id, request.terminal.terminal_id, purpose,
       session.verified_at, consent.consent_id, ctx.key, ctx.hash, session.expires_at])).rows[0];
-    const recipientResults = [];
     for (const recipient of recipients) {
-      const delivery = (await ctx.db.query(`INSERT INTO mail_deliveries(check_id,user_id,recipient_id,recipient_order_no,encrypted_email_snapshot,provider,next_attempt_at)
+      await ctx.db.query(`INSERT INTO mail_deliveries(check_id,user_id,recipient_id,recipient_order_no,encrypted_email_snapshot,provider,next_attempt_at)
         VALUES($1,$2,$3,$4,$5,$6,current_timestamp) RETURNING delivery_id`, [check.check_id, user.user_id, recipient.recipient_id,
-        recipient.order_no, recipient.encrypted_email, this.mail.name])).rows[0];
-      recipientResults.push({ delivery_id: delivery.delivery_id, recipient_id: recipient.recipient_id, status: 'queued' });
+        recipient.order_no, recipient.encrypted_email, this.mail.name]);
     }
     await this.updateSession(session, { consumed_by_check_id: check.check_id }, ctx);
     await audit(ctx.db, this.config, request, 'mail.queued', 'safety_check', check.check_id);
-    return { status: 202, body: { check_id: check.check_id, status: 'queued', recipient_results: recipientResults } };
+    return { status: 202, body: { success: true, send_requested: true, check_id: check.check_id, user_id: user.user_id } };
   }
   async getCheck(request, id) {
     return transaction(this.pool, async db => {
@@ -381,10 +384,9 @@ export class UserService {
     const verified={verification_id:randomUUID(),verified_at:send.verified_at,authentication_method:'image',liveness_passed:false};
     const created=await this.newSession(ctx.db,request,send.user_id,'registration',verified,ctx,true);
     created.session.confirmed_at=new Date().toISOString(); created.session.consumed_by_check_id=send.check_id;
-    const rows=(await ctx.db.query('SELECT delivery_id,recipient_id,status FROM mail_deliveries WHERE check_id=$1 ORDER BY recipient_order_no',[send.check_id])).rows;
     return {body:{matched:true,result:'matched',verification_status:'verified',user_id:send.user_id,user_status:user.status,
       metrics:{similarity_score:null,match_threshold:this.config.matchThreshold*100,liveness_passed:false},similarity_score:null,
-      check_id:send.check_id,mail_status:send.status,recipient_results:rows,registration_completed:user.status==='active',
+      check_id:send.check_id,send_requested:true,registration_completed:user.status==='active',
       ...created.credentials,recovered:true}};
   }
   async confirmRecipients(request,userId,body,ctx) {
@@ -412,10 +414,10 @@ export class UserService {
     if (!body.consent) {
       await this.updateSession(session,{revoked_at:new Date().toISOString()},ctx);
       await audit(ctx.db,this.config,request,'consent.safety','user',body.user_id,'denied');
-      return {body:{check_id:null,user_id:body.user_id,mail_status:'cancelled',recipient_results:[],session_ended:true}};
+      return {body:{success:true,send_requested:false,check_id:null,user_id:body.user_id,session_ended:true}};
     }
     const result=await this.queueForSession(request,ctx,'safety',body,null,session);
-    return {...result,body:{...result.body,user_id:body.user_id,mail_status:result.body.status}};
+    return result;
   }
   async retryCheck(request, id, ctx) {
     if (!this.mail.ready) unavailable('メール送信サービス');
