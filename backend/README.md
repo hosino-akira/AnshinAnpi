@@ -12,14 +12,22 @@
 
 该命令补齐 `.env` 中的本地随机密钥、启动 PostgreSQL、应用迁移、构建并启动 API。地址为 `http://localhost:3001`，可通过 `/health/ready` 检查数据库连接，通过 `/openapi.json` 获取 OpenAPI 文档。临时数据保存在单个后端进程的内存中，后端重启后未完成登记失效。
 
-需要本地终端及开发同意文面时，在 `backend` 目录运行：
+如果 Docker Desktop 启动时报 `could not find redis: not found`，旧 API 容器仍保留移除 Redis 前的依赖信息。在项目根目录运行以下命令，按当前配置重新构建和创建服务；PostgreSQL 数据卷会保留：
+
+```powershell
+docker compose up -d --build --wait
+```
+
+`docker compose start` 只启动已有容器，不会更新容器配置或应用代码，因此升级后应使用 `up`。
+
+首次安装依赖，或检查固定机器人记录时，在 `backend` 目录运行：
 
 ```powershell
 npm ci
 npm run provision:dev
 ```
 
-终端凭据保存在 Git 忽略的 `backend/.local-terminal.json`，不打印到日志。这项命令只允许开发环境；开发同意文面明确标记为测试用途。它不会创建正式用户或发送邮件。
+后端在启动时自动初始化固定机器人记录，复用已有 LOCAL-DEV-01 的终端 UUID，保留历史关联；空库使用代码内固定 UUID。App 无需终端凭据文件。provision:dev 只用于开发环境检查和初始化该记录，不再签发 Token。
 
 开发时也可以在 PostgreSQL 已启动后运行 `npm run dev`。配置从项目根目录 `.env` 加载，既有环境变量优先。Docker 使用 `postgres:5432` ，主机运行 Node 使用 `localhost:5433` 。
 
@@ -31,7 +39,7 @@ AWS 资源尚未配置时，普通数据与文面接口可以调用；需要识�
 
 最终流程及可复制请求见 [前端调用交接](docs/FRONTEND_FACE_HANDOFF.md)。主机联调地址为 `http://192.168.0.51:3002`，当前工作树的 Node API 使用 3002；上面的 Docker 启动端口依实际配置。新版登记使用 capture → 一次 register → verify 自动入队登记通知 → GET mail-results。全部邮件受理后才激活用户。安否使用 identify → 本人确认并获取遮蔽联系人 → safety-notifications → GET mail-results。旧拆分接口保留兼容，OpenAPI 已标记弃用。
 
-公开的 GET /v1/consent-policies 无需终端认证，其他业务接口使用 `X-Terminal-Id` 和 `X-Terminal-Token` 认证。识别成功后返回短期 `user_token`，后续本人操作使用 `Authorization: Bearer ...`，服务端校验所属终端、用户状态、用途、本人确认和超时。POST、PATCH、PUT、DELETE 必须提供 `Idempotency-Key`；邮件回调除外。
+当前为单机器人模式，业务接口不再要求或使用 `X-Terminal-Id`、`X-Terminal-Token`。任何能够访问 API 的客户端均归属固定机器人，设备身份不再验证。识别成功后返回短期 `user_token`，后续本人操作使用 `Authorization: Bearer ...`，服务端校验所属终端、用户状态、用途、本人确认和超时。POST、PATCH、PUT、DELETE 必须提供 `Idempotency-Key`；邮件回调除外。
 
 发送接口返回 `202 queued`，前端轮询发送结果。`queued`/`sending` 不是成功；`accepted` 才表示服务商已接受。`unknown` 表示外部请求可能已成功，需要回调或工作人员核对，不能自动重发。
 
@@ -39,6 +47,17 @@ AWS 资源尚未配置时，普通数据与文面接口可以调用；需要识�
 
 Rekognition 不导出原始特征向量；数据库 `face_templates.encrypted_template` 保存加密的 Collection/FaceId 引用，真正的特征由 AWS Collection 管理。原图不写入 PostgreSQL 或 S3。用户暂停或注销会将模板标记 revoked；邮件工作进程在现有 face_templates 表中读取待清理引用，清除 AWS 特征后标记 deleted。取消或失败的登记尝试立即清理云端引用，不再使用独立清理队列和租约。Collection 应专用于本应用。
 
+## Docker 本地 AWS 登录凭据
+
+本机的 `anshin-dev` 使用 AWS CLI 的 `aws login` 短期登录。普通 Compose 不会读取主机 AWS Profile。完成本机登录后，在项目根目录使用本地覆盖配置启动 API：
+
+```powershell
+docker compose -f compose.yaml -f compose.aws-local.yaml up -d --no-deps --force-recreate api
+```
+
+覆盖配置将当前 Windows 用户的 `.aws/config` 只读挂载到容器，并挂载 `.aws/login/cache` 供 SDK 读取和更新短期登录缓存。缓存必须可写，否则自动刷新无法保存。SDK 根据 `.env` 的 `AWS_PROFILE` 选择 Profile；服务地区仍由 `.env` 的 AWS_REGION / AWS_REKOGNITION_REGION 决定。凭据不复制到镜像，也不写入仓库或浏览器。
+
+需要 AWS 时，后续重建 API 继续带这两个 `-f` 参数；只使用普通 `docker compose up` 或 backend.ps1 start 会恢复基础配置，移除凭据挂载。登录会话到期后需要重新登录；容器凭据成功不代表 Collection 或邮件权限已经配置完成。本地覆盖配置仅用于开发，云部署使用运行角色。
 ## AWS 接入信息
 
 本机配置 `AWS_PROFILE`、`AWS_REGION`、`AWS_REKOGNITION_REGION` 和
@@ -47,13 +66,13 @@ Rekognition 不导出原始特征向量；数据库 `face_templates.encrypted_te
 ```powershell
 # 只读查询 Collection，验证后端 SDK 凭据和连接
 npm run check:rekognition
-# 创建一个真实活体会话，经终端认证、API 路由及进程内存，并验证幂等重试
+# 创建一个真实活体会话，经固定机器人上下文、API 路由及进程内存，并验证幂等重试
 npm run check:rekognition:liveness
 ```
 
-第二项需要 `npm run provision:dev` 生成的本地终端凭据，并访问 PostgreSQL。
+第二项需要访问 PostgreSQL；API 自动使用固定机器人，无需终端凭据。
 它通过 Fastify 的请求注入执行现有接口，不要求先监听 HTTP 端口；不会拍摄、
-注册人脸或发送邮件。一次 AWS 会话会自然过期，终端凭据和会话 ID 不打印。
+注册人脸或发送邮件。一次 AWS 会话会自然过期，AWS 凭据和会话 ID 不打印。
 通过该检查只表示会话创建成功，摄像头挑战和活体结果仍需前端联调。
 
 主机运行 `npm start` 可读取本机 AWS Profile。已有 Docker API 占用 3001 时，

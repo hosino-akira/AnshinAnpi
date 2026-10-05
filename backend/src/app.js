@@ -2,7 +2,7 @@ import Fastify, { LogController } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import { randomUUID } from 'node:crypto';
-import { sha256, equal } from './crypto.js';
+import { ensureSingleTerminal } from './single-terminal.js';
 import { fail, installErrorHandler } from './errors.js';
 import { bodySchemas, uuid } from './validation.js';
 import { idempotent } from './idempotency.js';
@@ -12,6 +12,7 @@ import { openApiDocument } from './openapi.js';
 
 export async function createApp(deps) {
   const { config, pool, store } = deps;
+  const singleTerminal = await ensureSingleTerminal(pool);
   const app = Fastify({ logger: deps.logger ?? { level: config.logLevel, redact: ['req.headers.authorization', 'req.headers["x-terminal-token"]', 'req.body'] },
     genReqId: () => randomUUID(), logController: new LogController({ disableRequestLogging: true }), bodyLimit: 1024 * 1024,
     requestTimeout: 30000, trustProxy: false });
@@ -50,11 +51,10 @@ export async function createApp(deps) {
   await app.register(async api => {
     api.decorateRequest('terminal', null);
     api.addHook('onRequest', async request => {
-      const terminalId = request.headers['x-terminal-id'];
-      const terminalToken = request.headers['x-terminal-token'];
-      if (!uuid.safeParse(terminalId).success || typeof terminalToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(terminalToken)) fail(401, 'TERMINAL_AUTH_REQUIRED', '認証済み端末から操作してください。');
+      // クライアントの端末ヘッダーは使わず、固定ロボットに関連付けます。
+      const terminalId = singleTerminal.terminal_id;
       const terminal = (await pool.query(`SELECT * FROM terminals WHERE terminal_id=$1 AND status='active'`, [terminalId])).rows[0];
-      if (!terminal?.credential_fingerprint || !equal(sha256(terminalToken).toString('hex'), terminal.credential_fingerprint)) fail(401, 'TERMINAL_AUTH_FAILED', '端末認証に失敗しました。');
+      if (!terminal) fail(503, 'TERMINAL_UNAVAILABLE', 'ロボットは現在利用できません。');
       request.terminal = terminal;
       const rateKey = store.key('rate', `${terminalId}:${Math.floor(Date.now() / 60000)}`);
       const count = await store.state.incr(rateKey);

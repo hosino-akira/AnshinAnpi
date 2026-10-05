@@ -1,7 +1,5 @@
-import { readFile } from 'node:fs/promises';
-
-// Development-only proxy. Terminal secrets stay on the local Node server.
-export function createTerminalMiddleware({ backendUrl, credentialsPath, fetchImpl = fetch }) {
+// Development-only proxy for the fixed single robot; no device credentials are required.
+export function createTerminalMiddleware({ backendUrl, fetchImpl = fetch }) {
   const target = new URL(backendUrl);
   if (!['127.0.0.1', 'localhost', '[::1]'].includes(target.hostname)
       || target.protocol !== 'http:') throw new Error('Local backend URL must use loopback HTTP');
@@ -40,9 +38,7 @@ export function createTerminalMiddleware({ backendUrl, credentialsPath, fetchImp
       return;
     }
     try {
-      const terminal = JSON.parse(await readFile(credentialsPath, 'utf8'));
-      const headers = { 'Content-Type': 'application/json',
-        'X-Terminal-Id': terminal.terminal_id, 'X-Terminal-Token': terminal.terminal_token };
+      const headers = { 'Content-Type': 'application/json' };
       for (const name of ['authorization', 'idempotency-key']) {
         if (typeof request.headers[name] === 'string') headers[name] = request.headers[name];
       }

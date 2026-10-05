@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { RekognitionClient, DescribeCollectionCommand } from '@aws-sdk/client-rekognition';
 import { loadLocalEnv } from '../src/config.js';
@@ -20,12 +19,10 @@ try {
   console.log(JSON.stringify({ check: 'collection', status: 'ok', region, collectionId,
     faceCount: collection.FaceCount, modelVersion: collection.FaceModelVersion }));
   if (process.argv.includes('--liveness')) {
-    const terminal = JSON.parse(await readFile(new URL('../.local-terminal.json', import.meta.url), 'utf8'));
     runtime = await createRuntime();
     app = await createApp({ ...runtime, logger: false });
     const request = { method: 'POST', url: '/v1/faces/liveness-sessions',
-      headers: { 'x-terminal-id': terminal.terminal_id, 'x-terminal-token': terminal.terminal_token,
-        'idempotency-key': randomUUID() }, payload: { purpose: 'safety' } };
+      headers: { 'idempotency-key': randomUUID() }, payload: { purpose: 'safety' } };
     const response = await app.inject(request);
     const body = response.json();
     if (response.statusCode !== 201 || !body.liveness_session_id) {
@@ -38,9 +35,8 @@ try {
       region: body.region, expiresAt: body.expires_at, idempotencyReplay: true }));
   }
 } catch (error) {
-  // Never print raw SDK errors, terminal credentials, or session identifiers.
+  // Never print raw SDK errors, credentials, or session identifiers.
   const code = error.$metadata ? error.name
-    : error.code === 'ENOENT' ? 'TERMINAL_CONFIG_REQUIRED'
     : /^[A-Z][A-Z0-9_]{0,99}$/.test(error.message ?? '') ? error.message : error.name;
   console.error(JSON.stringify({ status: 'failed', code,
     httpStatus: error.$metadata?.httpStatusCode }));

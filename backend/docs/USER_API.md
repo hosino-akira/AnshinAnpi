@@ -1,6 +1,6 @@
 # 用户端接口合同（最终流程）
 
-版本 0.2.0，2026-10-02。主机开发地址 `http://localhost:3002`，局域网地址 `http://192.168.0.51:3002`；Docker 端口由 compose 与 .env 决定。JSON/UTF-8，时间为 UTC ISO 8601，终端时区由 GET /v1/terminal 返回。所有接口返回 Cache-Control: no-store。
+版本 0.3.0，2026-10-05。主机开发地址 `http://localhost:3002`，局域网地址 `http://192.168.0.51:3002`；Docker 端口由 compose 与 .env 决定。JSON/UTF-8，时间为 UTC ISO 8601，终端时区由 GET /v1/terminal 返回。所有接口返回 Cache-Control: no-store。
 
 完整请求、响应、前端代码及局域网代理配置见 [最终版前端交接文档](FRONTEND_FACE_HANDOFF.md)。机器合同见 [OpenAPI JSON](openapi.json)，在线地址 /openapi.json。字段以代码生成的合同为准。
 
@@ -26,7 +26,7 @@
 
 ## 鉴权与防重复
 
-公开：GET /health/live、/health/ready、/openapi.json、/v1/consent-policies。其余业务接口使用 X-Terminal-Id 与 X-Terminal-Token；注册④/⑤、安否②/③/结果需要 Authorization: Bearer <user_token>。终端凭据由 BFF 添加，不传入浏览器代码。
+单机器人模式：后端固定关联 LOCAL-DEV-01，App 不需要 X-Terminal-Id 或 X-Terminal-Token；传入这两个头也不会切换设备身份。任何能连接 API 的客户端均使用该机器人身份。注册④/⑤、安否②/③/结果仍需要 Authorization: Bearer <user_token>；公开文面和健康接口不需要用户令牌。
 
 所有 POST、PATCH、PUT、DELETE 请求必须带 Idempotency-Key；SNS Webhook 例外。对同一操作重试保留相同编号、正文和原令牌；同一编号不同内容返回 409 IDEMPOTENCY_CONFLICT。成功重放带 Idempotency-Replayed: true，内存成功响应保留 15 分钟。注册④令牌轮换后，下一步用新令牌；原步骤重试用原令牌。
 
@@ -36,9 +36,9 @@
 
 | 方法与路径 | 用途 | 令牌 |
 | --- | --- | --- |
-| GET /v1/terminal | 终端时区、服务配置能力 | 终端凭据 |
-| GET /v1/registrations/{temp_id} | 草稿进度和有效期 | 终端凭据 |
-| DELETE /v1/registrations/{temp_id} | 丢弃临时图片和草稿，正文 {} | 终端凭据 |
+| GET /v1/terminal | 终端时区、服务配置能力 | 无需令牌 |
+| GET /v1/registrations/{temp_id} | 草稿进度和有效期 | 无需令牌 |
+| DELETE /v1/registrations/{temp_id} | 丢弃临时图片和草稿，正文 {} | 无需令牌 |
 | POST /v1/mail-results/{check_id}/retry | 重试允许重试的失败联系人，正文 {} | 同用户/终端且已验证确认 |
 | DELETE /v1/sessions/current | 结束当前会话，正文 {} | 当前用户令牌 |
 | POST /v1/mail/webhooks | SES 通知处理 | SNS 签名与允许的 Topic，非前端接口 |
@@ -51,7 +51,7 @@ registration_completed 只对 type=registration 计算。type=safety 中该字�
 
 image_base64 是 JPEG/PNG 纯 Base64，不含 data URL 前缀，解码后最多 512 KiB；不得提交客户端计算的分数、模板或活体标志。返回 metrics.face_confidence、brightness、sharpness；识别时返回 similarity_score 和 match_threshold，范围 0–100，无可用相似度为 null。liveness_passed=false 表示图片模式没有活体证明。
 
-400 输入格式或缺少防重复编号；401 终端/用户会话；403 用户 ID 不符/未确认本人；404 无权限访问或没有记录；409 版本/状态/幂等冲突；410 草稿过期；422 无人脸/多人脸/质量问题；429 冷却或限流；503 AWS/邮件服务配置、资源、身份或权限异常。详细错误码与示例见交接文档。
+400 输入格式或缺少防重复编号；401 用户会话；403 用户 ID 不符/未确认本人；404 无权限访问或没有记录；409 版本/状态/幂等冲突；410 草稿过期；422 无人脸/多人脸/质量问题；429 冷却或限流；503 固定机器人停用，或 AWS/邮件服务配置、资源、身份或权限异常。详细错误码与示例见交接文档。
 
 ## 旧接口兼容
 

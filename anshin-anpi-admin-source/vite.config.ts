@@ -1,6 +1,5 @@
 import vinext from "vinext";
 import { defineConfig, loadEnv } from "vite";
-import { resolve } from "node:path";
 import { createTerminalMiddleware } from "./build/local-terminal-proxy.mjs";
 import hostingConfig from "./.openai/hosting.json";
 import { sites } from "./build/sites-vite-plugin";
@@ -62,7 +61,6 @@ export default defineConfig(async ({ command, mode }) => {
         configureServer(server: import("vite").ViteDevServer) {
           server.middlewares.use(createTerminalMiddleware({
             backendUrl: localEnv.ANSHIN_BACKEND_URL || "http://127.0.0.1:3002",
-            credentialsPath: resolve(process.cwd(), "../backend/.local-terminal.json"),
           }));
         },
       }] : []),

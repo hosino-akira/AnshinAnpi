@@ -3,6 +3,7 @@ WORKDIR /app
 COPY backend/package*.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 COPY --chown=node:node backend/src ./src
+COPY --chown=node:node backend/config ./config
 USER node
 ENV API_HOST=0.0.0.0
 EXPOSE 3001

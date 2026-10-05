@@ -3,16 +3,16 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { loadLocalEnv, readConfig } from '../../src/config.js';
 import { createPool } from '../../src/db.js';
-import { LocalCipher, token, sha256 } from '../../src/crypto.js';
+import { LocalCipher, sha256 } from '../../src/crypto.js';
 import { TemporaryStore } from '../../src/temporary-store.js';
 import { createApp } from '../../src/app.js';
+import { ensureSingleTerminal, SINGLE_TERMINAL_CODE, SINGLE_TERMINAL_ID } from '../../src/single-terminal.js';
 import { MailWorker } from '../../src/mail-worker.js';
 import { MailFailure } from '../../src/providers/aws-mail.js';
 import { auditDigest } from '../../src/audit.js';
 
 if (!/^anshin_api_test_[a-zA-Z0-9_]+$/.test(process.env.TEST_DATABASE_NAME ?? '')) throw new Error('TEST_DATABASE_NAME must name an isolated anshin_api_test_* database');
 let app, pool, config, store, worker, terminal, otherTerminal, face, mail;
-const credentials = token(); const otherCredentials = token();
 let identity = 'person-a';
 const observedErrors = [];
 
@@ -23,8 +23,14 @@ before(async () => {
   pool = createPool(config);
   store = new TemporaryStore(config);
   const facility = { facility_id:randomUUID() };
-  terminal = (await pool.query(`INSERT INTO terminals(facility_id,terminal_code,name,status,credential_fingerprint) VALUES($1,$2,'Test terminal','active',$3) RETURNING *`, [facility.facility_id, randomUUID(), sha256(credentials).toString('hex')])).rows[0];
-  otherTerminal = (await pool.query(`INSERT INTO terminals(facility_id,terminal_code,name,status,credential_fingerprint) VALUES($1,$2,'Other terminal','active',$3) RETURNING *`, [facility.facility_id, randomUUID(), sha256(otherCredentials).toString('hex')])).rows[0];
+  const created = await ensureSingleTerminal(pool);
+  assert.equal(created.terminal_id, SINGLE_TERMINAL_ID);
+  assert.equal(created.credential_fingerprint, null);
+  // 旧環境の端末UUIDを模擬し、起動時に置き換えないことを確認します。
+  await pool.query('UPDATE terminals SET terminal_id=$1 WHERE terminal_code=$2', [randomUUID(), SINGLE_TERMINAL_CODE]);
+  terminal = await ensureSingleTerminal(pool);
+  assert.notEqual(terminal.terminal_id, SINGLE_TERMINAL_ID);
+  otherTerminal = (await pool.query(`INSERT INTO terminals(facility_id,terminal_code,name,status) VALUES($1,$2,'Other terminal','active') RETURNING *`, [facility.facility_id, randomUUID()])).rows[0];
   const policies = ['registration','safety'].map(consent_type => ({consent_type,policy_version:'test-v1',title:'Test',body:'Test policy',status:'published',requires_reconsent:false}));
   face = {
     name: 'test-face', ready: true, references: new Map(), sessions: new Map(), override: null, indexCalls: 0, failCapture: false,
@@ -59,8 +65,7 @@ after(async () => {
 });
 
 async function request(method, url, body, userToken, extra = {}) {
-  const headers = { 'x-terminal-id': terminal.terminal_id, 'x-terminal-token': credentials,
-    ...(method !== 'GET' ? { 'idempotency-key': randomUUID() } : {}), ...(userToken ? { authorization: `Bearer ${userToken}` } : {}), ...extra };
+  const headers = { ...(method !== 'GET' ? { 'idempotency-key': randomUUID() } : {}), ...(userToken ? { authorization: `Bearer ${userToken}` } : {}), ...extra };
   const response = await app.inject({ method, url, headers, ...(body !== undefined ? { payload: body } : {}) });
   return { status: response.statusCode, body: response.statusCode===204 ? null : response.json(), response };
 }
@@ -102,7 +107,7 @@ async function identify(label) {
 }
 let personA, personB;
 
-test('published policies are public while private operations remain authenticated', async () => {
+test('published policies are public and device-free writes still require idempotency', async () => {
   for (const type of ['registration','safety']) {
     const response=await app.inject({method:'GET',url:`/v1/consent-policies?type=${type}`,headers:{origin:'http://frontend.example:5174'}});
     assert.equal(response.statusCode,200);
@@ -112,13 +117,31 @@ test('published policies are public while private operations remain authenticate
     assert.equal(response.headers['cache-control'],'no-store');
   }
   assert.equal((await app.inject({method:'GET',url:'/v1/consent-policies?type=invalid'})).statusCode,400);
-  assert.equal((await app.inject({method:'POST',url:'/v1/enrollments',payload:{}})).statusCode,401);
-  assert.equal((await app.inject({method:'POST',url:'/v1/faces/identify',payload:{image_base64:'aQ=='}})).statusCode,401);
+  for (const [url,payload] of [['/v1/enrollments',{}],['/v1/faces/identify',{image_base64:'aQ=='}]]) {
+    const response=await app.inject({method:'POST',url,payload});
+    assert.equal(response.statusCode,400);
+    assert.equal(response.json().error.code,'IDEMPOTENCY_KEY_REQUIRED');
+  }
 });
 
-test('terminal authentication, policy and service-not-configured behavior', async () => {
-  assert.equal((await app.inject({ method:'GET',url:'/v1/terminal' })).statusCode,401);
-  assert.equal((await request('GET','/v1/terminal',undefined,null,{ 'x-terminal-token': token() })).status,401);
+test('single robot works without device headers and ignores client device overrides', async () => {
+  const direct = await app.inject({ method:'GET',url:'/v1/terminal' });
+  assert.equal(direct.statusCode,200);
+  assert.equal(direct.json().terminal_id,terminal.terminal_id);
+  const overridden = await success('GET','/v1/terminal',undefined,null,
+    { 'x-terminal-id':otherTerminal.terminal_id,'x-terminal-token':'unused' });
+  assert.equal(overridden.terminal_id,terminal.terminal_id);
+  await pool.query("UPDATE terminals SET status='maintenance' WHERE terminal_id=$1",[terminal.terminal_id]);
+  try {
+    const inactive=await request('GET','/v1/terminal');
+    assert.equal(inactive.status,503);
+    assert.equal(inactive.body.error.code,'TERMINAL_UNAVAILABLE');
+    assert.equal((await ensureSingleTerminal(pool)).status,'maintenance');
+  } finally {
+    await pool.query("UPDATE terminals SET status='active' WHERE terminal_id=$1",[terminal.terminal_id]);
+  }
+  assert.equal((await request('POST','/v1/registrations/capture',{image_base64:'aGVsbG8='},null,
+    {'idempotency-key':''})).body.error.code,'IDEMPOTENCY_KEY_REQUIRED');
   assert.equal((await success('GET','/v1/consent-policies?type=registration')).policy_version,'test-v1');
   mail.ready=false;
   assert.equal((await request('POST','/v1/safety-checks',{ policy_version:'test-v1',consent:true })).status,503);
@@ -167,7 +190,18 @@ test('concurrent duplicate safety requests create one event and exactly one deli
 test('a token from another user or terminal cannot read a send result', async () => {
   personB=await enroll('person-b');
   assert.equal((await request('GET',`/v1/safety-checks/${personA.checkId}`,undefined,personB.token)).status,404);
-  assert.equal((await request('GET','/v1/users/me/recipients',undefined,personA.token,{ 'x-terminal-id':otherTerminal.terminal_id,'x-terminal-token':otherCredentials })).status,401);
+  assert.equal((await request('GET','/v1/users/me/recipients')).status,401);
+  const hash=sha256(personA.token).toString('hex');
+  const session=await store.get('session',hash);
+  const originalTerminal=session.terminal_id;
+  session.terminal_id=otherTerminal.terminal_id;
+  await store.put('session',hash,session,session.expires_at);
+  try {
+    assert.equal((await request('GET','/v1/users/me/recipients',undefined,personA.token)).status,401);
+  } finally {
+    session.terminal_id=originalTerminal;
+    await store.put('session',hash,session,session.expires_at);
+  }
 });
 test('expired and idle sessions do not reveal personal information', async () => {
   const raw=await identify('person-a'); await success('POST','/v1/users/me/confirmation',{ confirmed:true },raw);
@@ -190,7 +224,13 @@ test('ambiguous and absent recognition results return no names or user token', a
 test('liveness sessions are single use and bound to a terminal; client flags are rejected', async () => {
   identity='person-a';const id=await liveness('safety');
   assert.equal((await request('POST','/v1/faces/identify',{ liveness_session_id:id, liveness_passed:true })).status,400);
-  assert.equal((await request('POST','/v1/faces/identify',{ liveness_session_id:id },null,{ 'x-terminal-id':otherTerminal.terminal_id,'x-terminal-token':otherCredentials })).status,410);
+  const record=await store.get('liveness',id);
+  const expiry=new Date(Date.now()+60000).toISOString();
+  record.terminalId=otherTerminal.terminal_id;
+  await store.put('liveness',id,record,expiry);
+  assert.equal((await request('POST','/v1/faces/identify',{ liveness_session_id:id })).status,410);
+  record.terminalId=terminal.terminal_id;
+  await store.put('liveness',id,record,expiry);
   await success('POST','/v1/faces/identify',{ liveness_session_id:id });
   assert.equal((await request('POST','/v1/faces/identify',{ liveness_session_id:id })).status,410);
 });

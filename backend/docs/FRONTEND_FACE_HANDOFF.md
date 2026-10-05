@@ -1,6 +1,6 @@
 # 前端联调交接：最终版登记与安否接口
 
-更新日期：2026-10-02。本文对应主目录 `C:\Users\27357\anshin-anpi` 的 main 分支实现；后续开发直接在该目录进行。
+更新日期：2026-10-05。本文对应主目录 `C:\Users\27357\anshin-anpi` 的 main 分支实现；后续开发直接在该目录进行。
 
 ## 地址与联调前提
 
@@ -14,7 +14,7 @@
 | 本机摄像头首页 | `http://localhost:5173/` |
 | 本机照片上传测试页 | `http://localhost:5173/dev/face` |
 
-192.168.0.51 是开发机局域网地址，地址变更时需更新同事的代理配置。本机前端 5173 仅供本机使用；同事运行自己的前端，通过服务端代理访问以上 3002 后端。
+192.168.0.51 是开发机局域网地址，地址变更时更新 Android App 的后端地址。App 直接访问 3002，不需要网页代理或终端凭据。本机 5173 的网页和照片上传页供开发自测使用。
 
 **当前环境限制：** 新接口已用真实 PostgreSQL、注入的测试人脸/邮件服务验证；测试不发送真实邮件。此前检查的是旧地区 `us-east-1`，当时 `anshin-anpi-faces-dev` Collection 不存在、SES 未配置、邮件工作进程关闭。现已改用东京 `ap-northeast-1`，需要以主目录当前配置重新验证对应资源，不能沿用旧地区的检查结果。因此文面接口可直接联调，真实登记、识别、邮件全流程还需恢复 Collection、配置 SES 发件身份和权限，并启用邮件工作进程后重启后端。`/health/ready` 只检查数据库，`capabilities.face/mail` 只表示配置齐全，不保证外部资源可用。不要把健康检查 200 理解为邮件发送成功。
 
@@ -48,50 +48,33 @@
 
 ## 连接与请求头
 
-除健康检查、OpenAPI、同意文面外，业务接口需要终端认证。浏览器请求自己的同源代理 `/api/terminal/...`，代理转发到后端 `/v1/...` 并添加终端凭据。用户令牌仍由前端放在页面内存，代理透传。
+当前为单机器人模式。后端固定使用 LOCAL-DEV-01，复用已有终端 UUID；空库自动初始化固定记录。Android App 直接请求后端基础地址加 /v1/...，不需要 X-Terminal-Id、X-Terminal-Token 或终端凭据文件。旧客户端传这两个请求头也不会切换设备身份。所有能连接后端的客户端都按同一机器人处理。
+
+注册①首次照片的完整请求：
 
 ```http
+POST http://192.168.0.51:3002/v1/registrations/capture
 Content-Type: application/json
-X-Terminal-Id: <后台配置的终端 UUID>
-X-Terminal-Token: <服务端保存的终端凭据>
-Idempotency-Key: <本次写操作 UUID>
-Authorization: Bearer <本次验证返回的 user_token>
+Idempotency-Key: <本次采集的 UUID>
 ```
 
-- `X-Terminal-*` 留在前端 Node/BFF 服务端；不要放进 React、VITE 变量或浏览器存储。AWS 凭据仅用于后端。
-- Authorization 仅在上表标注用户令牌的步骤必需；正式 user_id 不能替代令牌。
-- POST、PUT、PATCH、DELETE 都需要 Idempotency-Key，GET 不需要。JSON 字段严格检查，不接收多余字段。
-- 一次操作生成一个键；超时/断线重试必须保留**相同键、相同正文、相同原令牌**。新照片使用新键。相同键内容不同返回 409 IDEMPOTENCY_CONFLICT。
-- 注册④成功后换用新的 user_token 查询结果；重试注册④原请求仍使用原令牌。避免把新的令牌代入旧请求，否则幂等摘要不同。
-- 用户令牌最多有效 3 分钟，闲置 90 秒失效。轮询建议每 2–3 秒，离开页面立即停止并清理个人数据。
-- 当前无 Redis，为单后端进程。邮件批次和防重复编号存在 PostgreSQL，重启不重复发信。已提交的注册④可用完整原请求重放恢复查询令牌：`recovered=true`，相似度 `null`（没有持久保存评分），仍是原 `check_id`。其他失效用户会话需要重新识别，草稿不能恢复。
-
-同事的 Vite 前端可以使用内置 proxy（这是同事机器服务端配置；不要复制本项目仅允许回环地址的本地代理用于远程后端）：
-
-```ts
-// vite.config.ts。终端凭据从服务端环境读取，不使用 VITE_ 前缀。
-import { defineConfig } from 'vite';
-export default defineConfig({
-  server: {
-    host: '127.0.0.1',
-    proxy: {
-      '/api/terminal': {
-        target: 'http://192.168.0.51:3002',
-        changeOrigin: true,
-        rewrite: path => path.replace(/^\/api\/terminal/, '/v1'),
-        headers: {
-          'X-Terminal-Id': process.env.ANSHIN_TERMINAL_ID!,
-          'X-Terminal-Token': process.env.ANSHIN_TERMINAL_TOKEN!,
-        },
-      },
-    },
-  },
-});
+```json
+{ "image_base64": "<JPEG 或 PNG 的纯 Base64>" }
 ```
 
-通过开发机管理员配置一个有效终端及凭据，在同事启动 Vite 的终端中设置这些服务端环境变量即可；凭据通过受控方式交接，不提交 Git。此代理只在本机开发使用，生产需要对应的后端代理。不要跨域访问开发机 5173 的 `/api/terminal`，本项目本地代理会拒绝该访问。
+- AWS 凭据只由后端管理；App 不需要 AWS Profile 或 Access Key。
+- Authorization: Bearer <user_token> 仅在接口总表标注用户令牌的步骤必需，user_id 不能替代令牌。
+- POST、PUT、PATCH、DELETE 都需要 Idempotency-Key，GET 不需要；SNS 邮件回调使用独立签名校验。
+- 一次操作生成一个键；超时/断线重试保留相同键、正文和原令牌。新照片使用新键。同键不同内容返回 409 IDEMPOTENCY_CONFLICT。
+- 注册④成功后换用新的 user_token 查询结果；重试注册④原请求仍使用原令牌。
+- 用户令牌最长有效 3 分钟，闲置 90 秒失效。轮询建议每 2–3 秒，离开页面停止并清理个人数据。
+- 当前无 Redis，为单后端进程；发送编号存在 PostgreSQL，重启不会重复创建已提交的邮件批次。
+- 固定机器人状态不是 active 时返回 503 TERMINAL_UNAVAILABLE；重新启动不会自动恢复被停用的记录。
+- Android 的 localhost 指设备自身。局域网联调使用开发机 IP，网络需可达并允许 HTTP；正式部署使用 HTTPS。
 
-同事先打开公开 health/文面地址：打不开则检查同一局域网、Windows 入站 TCP 3002、后端 `API_HOST=0.0.0.0`；返回 TERMINAL_AUTH_REQUIRED 表示网络已通，需要配置代理凭据。使用同源代理时无需给同事浏览器 Origin 增加后端 CORS 白名单；若浏览器直接调用私有 API，则须匹配 `CORS_ORIGINS` 并提供终端凭据，建议使用前述代理。
+本机网页自测可继续使用 /api/terminal/... 同源代理；代理只转发用户令牌和防重复编号，无需读取终端凭据文件。网页代理保留仅本机访问限制。Android App 不经过这个代理。
+
+先测试 GET /health/ready 和公开同意文面。地址打不开时检查 IP、Windows 防火墙以及 API_HOST=0.0.0.0。健康检查通过只代表数据库连接正常；真实照片和邮件仍需验证 AWS 资源与权限。
 
 ## 照片与评分
 
@@ -270,7 +253,7 @@ POST /v1/safety-notifications，带安否①令牌和本步骤 Idempotency-Key�
 
 ## 可复用前端调用代码
 
-复制 `anshin-anpi-admin-source/lib/face-api.ts` 与 `lib/face-client.ts`，仅依赖浏览器 API。baseUrl 指向自己的同源代理。下面照片和姓名变量来自用户输入，示例不自动重试整条流程。
+下面是本机网页自测代码，使用同源代理。Android App 直接调用接口总表中的 /v1 路径，按相同正文、用户令牌和防重复编号规则实现；无需复制浏览器代码。示例不自动重试整条流程。
 
 ```ts
 import { createFaceClient } from './face-client';

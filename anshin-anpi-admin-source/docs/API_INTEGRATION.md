@@ -38,13 +38,13 @@ ANSHIN_DEV_FACE_ENABLED=true
 ANSHIN_BACKEND_URL=http://127.0.0.1:3002
 ```
 
-该代理读取 `backend/.local-terminal.json`，在服务器添加 X-Terminal-Id/X-Terminal-Token；浏览器请求 `/api/terminal/...`。它限制为本机回环后端和本机同源请求，不能用它访问另一台电脑的后端。**同事另一台电脑的代理配置请使用交接文档中的 Vite proxy 示例**，target 指向 192.168.0.51:3002。不要让同事跨域调用开发机 5173 的代理，也不要把终端凭据放进 VITE 变量。生产构建不启用这个开发代理或测试页，需生产 BFF。
+该代理用于本机网页自测，将 /api/terminal/... 转发到本机后端 /v1/...，只透传用户令牌和防重复编号，不读取终端凭据文件。后端统一使用固定机器人，App 不再需要 X-Terminal-Id 或 X-Terminal-Token。Android App 直接访问 http://192.168.0.51:3002/v1/...；本机代理仅接受回环后端和本机同源请求，不能作为远程 App 的入口。生产构建不启用开发代理或测试页。
 
 所有写操作支持显式传入 Idempotency-Key：一次操作固定键；网络失败重试保留相同请求正文、照片与原令牌。不要重试整条注册流程。注册④成功返回的新令牌用于后续查询；原请求重试仍用原登记令牌。用户会话最多 3 分钟，90 秒无操作失效，结束时清除页面个人信息。
 
 ## 验证和环境限制
 
-运行 `npx tsc --noEmit`、`npm run test:liveness`、`npx vite build`。代理测试使用测试凭据，不发送真实邮件或人脸。
+运行 `npx tsc --noEmit`、`npm run test:liveness`、`npx vite build`。代理测试不需要终端凭据，不发送真实邮件或人脸。
 
 照片为 JPEG/PNG 纯 Base64，解码后最大 512 KiB；摄像头/测试页缩小到最长边 1024 后压缩。图片模式不检测活体，不需 Cognito。没有候选的评分为 null；HTTP 200 还需检查 matched/result，不能直接当识别成功。
 

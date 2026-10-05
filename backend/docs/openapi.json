@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "安心安否確認 用户端 API",
-    "version": "0.2.0"
+    "version": "0.3.0"
   },
   "servers": [
     {
@@ -17,12 +17,7 @@
     "/v1/registrations/capture": {
       "post": {
         "summary": "注册① 检查照片并返回临时 ID",
-        "security": [
-          {
-            "TerminalId": [],
-            "TerminalToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -167,12 +162,7 @@
     "/v1/registrations": {
       "post": {
         "summary": "注册③ 一次保存全部登记资料",
-        "security": [
-          {
-            "TerminalId": [],
-            "TerminalToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -374,8 +364,6 @@
         "summary": "注册④ 比对照片，通过后自动入队登记通知",
         "security": [
           {
-            "TerminalId": [],
-            "TerminalToken": [],
             "UserToken": []
           }
         ],
@@ -529,12 +517,7 @@
     "/v1/registrations/{id}": {
       "get": {
         "summary": "查询临时登记进度",
-        "security": [
-          {
-            "TerminalId": [],
-            "TerminalToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "id",
@@ -651,12 +634,7 @@
       },
       "delete": {
         "summary": "取消临时登记",
-        "security": [
-          {
-            "TerminalId": [],
-            "TerminalToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "id",
@@ -801,8 +779,6 @@
         "summary": "安否② 确认本人并返回联系人和发送同意文面",
         "security": [
           {
-            "TerminalId": [],
-            "TerminalToken": [],
             "UserToken": []
           }
         ],
@@ -957,8 +933,6 @@
         "summary": "安否③ 同意并发送安否通知",
         "security": [
           {
-            "TerminalId": [],
-            "TerminalToken": [],
             "UserToken": []
           }
         ],
@@ -1126,8 +1100,6 @@
         "summary": "注册⑤／安否 只读查询邮件结果",
         "security": [
           {
-            "TerminalId": [],
-            "TerminalToken": [],
             "UserToken": []
           }
         ],
@@ -1251,8 +1223,6 @@
         "summary": "重试允许重试的失败收件人",
         "security": [
           {
-            "TerminalId": [],
-            "TerminalToken": [],
             "UserToken": []
           }
         ],
@@ -1616,12 +1586,7 @@
     "/v1/terminal": {
       "get": {
         "summary": "终端信息与 AWS 服务配置状态",
-        "security": [
-          {
-            "TerminalId": [],
-            "TerminalToken": []
-          }
-        ],
+        "security": [],
         "parameters": [],
         "responses": {
           "200": {
@@ -1852,12 +1817,7 @@
     "/v1/enrollments": {
       "post": {
         "summary": "开始临时登记",
-        "security": [
-          {
-            "TerminalId": [],
-            "TerminalToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -1992,12 +1952,7 @@
     "/v1/enrollments/{id}": {
       "get": {
         "summary": "查询临时登记进度",
-        "security": [
-          {
-            "TerminalId": [],
-            "TerminalToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "id",
@@ -2115,12 +2070,7 @@
       },
       "delete": {
         "summary": "取消并清除临时登记",
-        "security": [
-          {
-            "TerminalId": [],
-            "TerminalToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "id",
@@ -2264,12 +2214,7 @@
     "/v1/enrollments/{id}/profile": {
       "patch": {
         "summary": "暂存登记人姓名",
-        "security": [
-          {
-            "TerminalId": [],
-            "TerminalToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "id",
@@ -2422,12 +2367,7 @@
     "/v1/enrollments/{id}/face": {
       "post": {
         "summary": "核验并暂存上传照片或生体参考脸图",
-        "security": [
-          {
-            "TerminalId": [],
-            "TerminalToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "id",
@@ -2600,12 +2540,7 @@
     "/v1/enrollments/{id}/consent": {
       "post": {
         "summary": "记录登记同意或拒绝",
-        "security": [
-          {
-            "TerminalId": [],
-            "TerminalToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "id",
@@ -2766,12 +2701,7 @@
     "/v1/enrollments/{id}/recipients": {
       "put": {
         "summary": "暂存一至两名联系人",
-        "security": [
-          {
-            "TerminalId": [],
-            "TerminalToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "id",
@@ -2945,12 +2875,7 @@
     "/v1/enrollments/{id}/complete": {
       "post": {
         "summary": "原子保存正式登记资料",
-        "security": [
-          {
-            "TerminalId": [],
-            "TerminalToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "id",
@@ -3094,12 +3019,7 @@
     "/v1/faces/liveness-sessions": {
       "post": {
         "summary": "创建服务端生体检测会话",
-        "security": [
-          {
-            "TerminalId": [],
-            "TerminalToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -3253,8 +3173,6 @@
         "summary": "登记后重新核验脸部",
         "security": [
           {
-            "TerminalId": [],
-            "TerminalToken": [],
             "UserToken": []
           }
         ],
@@ -3421,12 +3339,7 @@
     "/v1/faces/identify": {
       "post": {
         "summary": "从有效登记人中识别本人",
-        "security": [
-          {
-            "TerminalId": [],
-            "TerminalToken": []
-          }
-        ],
+        "security": [],
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -3591,8 +3504,6 @@
         "summary": "确认或拒绝本人姓名",
         "security": [
           {
-            "TerminalId": [],
-            "TerminalToken": [],
             "UserToken": []
           }
         ],
@@ -3739,8 +3650,6 @@
         "summary": "读取联系人姓名与掩码邮箱",
         "security": [
           {
-            "TerminalId": [],
-            "TerminalToken": [],
             "UserToken": []
           }
         ],
@@ -3855,8 +3764,6 @@
         "summary": "开始发送登记确认邮件",
         "security": [
           {
-            "TerminalId": [],
-            "TerminalToken": [],
             "UserToken": []
           }
         ],
@@ -4005,8 +3912,6 @@
         "summary": "本次同意并开始安否邮件发送",
         "security": [
           {
-            "TerminalId": [],
-            "TerminalToken": [],
             "UserToken": []
           }
         ],
@@ -4160,8 +4065,6 @@
         "summary": "查询宛先逐项配信状态",
         "security": [
           {
-            "TerminalId": [],
-            "TerminalToken": [],
             "UserToken": []
           }
         ],
@@ -4286,8 +4189,6 @@
         "summary": "只重试符合条件的失败宛先",
         "security": [
           {
-            "TerminalId": [],
-            "TerminalToken": [],
             "UserToken": []
           }
         ],
@@ -4436,8 +4337,6 @@
         "summary": "结束当前用户会话",
         "security": [
           {
-            "TerminalId": [],
-            "TerminalToken": [],
             "UserToken": []
           }
         ],
@@ -4677,16 +4576,6 @@
   },
   "components": {
     "securitySchemes": {
-      "TerminalId": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "X-Terminal-Id"
-      },
-      "TerminalToken": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "X-Terminal-Token"
-      },
       "UserToken": {
         "type": "http",
         "scheme": "bearer",

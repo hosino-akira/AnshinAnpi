@@ -1,0 +1,19 @@
+# Local development only. Use with compose.yaml; credentials are not copied into the image.
+services:
+  api:
+    environment:
+      AWS_CONFIG_FILE: /home/node/.aws/config
+      AWS_LOGIN_CACHE_DIRECTORY: /home/node/.aws/login/cache
+    volumes:
+      - type: bind
+        source: ${USERPROFILE:?Set USERPROFILE}/.aws/config
+        target: /home/node/.aws/config
+        read_only: true
+        bind:
+          create_host_path: false
+      # The login provider writes refreshed tokens back to this cache.
+      - type: bind
+        source: ${USERPROFILE:?Set USERPROFILE}/.aws/login/cache
+        target: /home/node/.aws/login/cache
+        bind:
+          create_host_path: false

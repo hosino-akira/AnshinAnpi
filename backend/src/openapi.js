@@ -43,7 +43,7 @@ export function openApiDocument() {
     if (path.includes('{id}')) parameters.push({ name:'id',in:'path',required:true,schema:{ type:'string',format:'uuid' } });
     if (method !== 'get' && !publicRoute) parameters.push({ name:'Idempotency-Key',in:'header',required:true,schema:{ type:'string',minLength:1,maxLength:128,pattern:'^[A-Za-z0-9_.:-]+$' } });
     if (path==='/v1/consent-policies') parameters.push({ name:'type',in:'query',required:true,schema:{ type:'string',enum:['registration','safety'] } });
-    const security = publicRoute ? [] : [{ TerminalId:[],TerminalToken:[],...(bearer ? { UserToken:[] } : {}) }];
+    const security = bearer ? [{ UserToken:[] }] : [];
     const responseName = {
       '/v1/registrations/capture':'CaptureResult','/v1/registrations':'RegistrationResult',
       '/v1/registrations/verify':'FaceResult','/v1/faces/identify':'FaceResult',
@@ -63,9 +63,8 @@ export function openApiDocument() {
     if (body==='face') paths[path][method].description='二选一：image_base64（JPEG/PNG，解码后不超过512 KiB，不含 data URL 前缀）或 liveness_session_id。图片模式不检测活体。返回 metrics，分数为0–100；无可用候选时 similarity_score 为 null。登记接口仅返回图片质量指标。';
     if (path.endsWith('/webhooks')) paths[path][method].description='SNS 签名、Topic ARN、时间窗口和事件 ID 均由后端校验，不接受未签名客户端配信状态。';
   }
-  return { openapi:'3.1.0',info:{ title:'安心安否確認 用户端 API',version:'0.2.0' },servers:[{ url:'http://192.168.0.51:3002',description:'局域网开发后端（地址可能随 DHCP 改变）' },{url:'http://localhost:3002'}],paths,
-    components:{ securitySchemes:{ TerminalId:{ type:'apiKey',in:'header',name:'X-Terminal-Id' },
-      TerminalToken:{ type:'apiKey',in:'header',name:'X-Terminal-Token' },UserToken:{ type:'http',scheme:'bearer',description:'短期不透明用户令牌' } },
+  return { openapi:'3.1.0',info:{ title:'安心安否確認 用户端 API',version:'0.3.0' },servers:[{ url:'http://192.168.0.51:3002',description:'局域网开发后端（地址可能随 DHCP 改变）' },{url:'http://localhost:3002'}],paths,
+    components:{ securitySchemes:{ UserToken:{ type:'http',scheme:'bearer',description:'短期不透明用户令牌' } },
     schemas:{ ...responseSchemas(), Error:{ type:'object',required:['error'],properties:{ error:{ type:'object',required:['code','message','request_id'],
       properties:{ code:{ type:'string' },message:{ type:'string' },request_id:{ type:'string',format:'uuid' },details:{ type:'object' } } } } } } } };
 }

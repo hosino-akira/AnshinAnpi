@@ -1609,7 +1609,7 @@ export default function Home() {
   return (
     <main
       className="kiosk-shell"
-      onContextMenu={(event) => event.preventDefault()}
+      onContextMenu={(event) => { if (!import.meta.env.DEV) event.preventDefault(); }}
     >
       {/* 全画面共通：端末状態、手続き進捗、現在画面 */}
       <StatusHeader screen={screen} />
