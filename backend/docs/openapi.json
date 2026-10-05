@@ -4667,6 +4667,24 @@
             "minimum": 0,
             "maximum": 100
           },
+          "yaw": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "pitch": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "roll": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
           "liveness_passed": {
             "type": "boolean"
           },

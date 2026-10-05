@@ -54,6 +54,19 @@ test('empty collections return no candidates without attempting a search', async
   assert.deepEqual(calls, ['DescribeCollectionCommand']);
 });
 
+test('quality diagnostics identify posture and all failing measurements without changing thresholds', async () => {
+  const provider = new AwsFaceProvider({ rekognitionRegion: 'test', collectionId: 'test' }, {
+    send: async () => ({ FaceDetails: [{ ...face, Quality: { Brightness: 20, Sharpness: 90 }, Pose: { Yaw: 45, Pitch: 0, Roll: 0 } }] }),
+  });
+  await assert.rejects(provider.captureImage(photo.toString('base64')), error => {
+    assert.equal(error.code, 'FACE_QUALITY_FAILED');
+    assert.equal(error.details.yaw, 45);
+    assert.deepEqual(error.details.failed_checks, ['brightness', 'yaw']);
+    assert.equal(error.details.thresholds.pose_abs_max, 30);
+    return true;
+  });
+});
+
 test('AWS failures expose only safe diagnostics and classify invalid images', async () => {
   const provider = new AwsFaceProvider({ rekognitionRegion: 'test', collectionId: 'test' }, {
     send: async () => { const e = new Error('private response'); e.name = 'AccessDeniedException'; throw e; },

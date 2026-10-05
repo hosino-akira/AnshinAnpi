@@ -1,12 +1,11 @@
 # AWS 接入配置清单
 
-后端已经提供 AWS SDK 适配和配置项。Rekognition、前端活体凭据、SES 和生产加密资源分别配置与验证，某一项通过不代表其他服务已经可用。
+后端已经提供 AWS SDK 适配和配置项。Rekognition、前端活体凭据和生产加密资源分别配置与验证。邮件采用樱花 SMTP，配置见 [SMTP 邮件接入](MAIL_SMTP.md)，不需要 AWS SES 或 SNS 邮件权限。
 
 此前对旧美国地区的复查：Profile `anshin-dev`、Region `us-east-1` 能调用 AWS，
 但 `anshin-anpi-faces-dev` 的查询返回 `ResourceNotFoundException`（HTTP 400），
 当时该 Collection 不存在。现改用东京 `ap-northeast-1`，应以主目录当前配置重新检查东京资源；旧地区记录不代表东京状态。
-此前测试时 SES 未配置、邮件工作进程关闭；最终登记验证成功后会自动入队登记通知，
-因此完整测试还需配置发件身份和权限、启用邮件工作进程并重启后端。
+最终登记验证成功后会自动入队登记通知，完整测试需配置 SMTP、启用邮件工作进程并重启后端。
 只读复核命令为 `npm run check:rekognition`。图片模式不需要前端 Cognito 或活体视频；
 `npm run check:rekognition:liveness` 仅用于保留的可选活体流程。
 
@@ -14,28 +13,25 @@
 
 | 配置 | 用途 |
 | --- | --- |
-| `AWS_REGION` | SES、KMS、Secrets Manager 所在 Region |
+| `AWS_REGION` | KMS、Secrets Manager 所在 Region |
 | `AWS_REKOGNITION_REGION` | 同时支持所需 Rekognition 与 Face Liveness 的 Region；可与其他服务不同 |
 | `AWS_REKOGNITION_COLLECTION_ID` | 本应用专用脸部 Collection，不与其他应用共用 |
 | `AWS_KMS_KEY_ARN` | 用于个人数据信封加密的对称 KMS 密钥 |
 | `AWS_SECRET_ARN` | 包含暂存、查询、审计密钥的 Secrets Manager Secret |
-| `AWS_SES_FROM_EMAIL` | 已验证的专用发件地址，例如本域的 no-reply 地址 |
-| `AWS_SES_CONFIGURATION_SET` | 用于配信通知的 SES Configuration Set 名称 |
-| `AWS_SES_SNS_TOPIC_ARN` | 接收 SES 事件的 SNS Topic ARN |
 | AWS CLI Profile 或 IAM Role ARN | 后端调用 AWS 的凭据来源 |
 | Cognito Identity Pool ID/前端临时凭据方案 | Face Liveness 前端视频流所需的受限 AWS 凭据 |
-| HTTPS API 地址、前端 Origin | SNS 回调与跨域配置 |
+| HTTPS API 地址、前端 Origin | 跨域配置 |
 
-同时需要确认 SES 是否仍在沙箱；沙箱内只能发送到验证过的收件人或 SES 模拟邮箱。发件身份和生产访问申请按 [SES 身份验证](https://docs.aws.amazon.com/ses/latest/dg/creating-identities.html)、[SES 沙箱](https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html) 配置。
+SMTP 邮箱使用服务商提供的账号认证，与 AWS Region 和 SES 沙箱无关。
 
 ## 建议创建顺序
 
 1. 确定服务 Region 和 AWS 账户。Face Liveness 的 Region 覆盖与一般图像识别可能不同，以 [AWS Face Liveness 入门](https://docs.aws.amazon.com/rekognition/latest/dg/face-liveness-getting-started.html) 及 [AWS Region/Endpoint 表](https://docs.aws.amazon.com/general/latest/gr/rekognition.html) 为准，不仅凭“离设施最近”选择。
 2. 创建一个专用 Rekognition Collection。它保存脸部特征向量，应用数据库保存加密的 Collection/FaceId 引用。[Collection 的存储行为](https://docs.aws.amazon.com/rekognition/latest/dg/collections.html)。
 3. 为前端的 Face Liveness 组件配置 Cognito Identity Pool 或受控临时凭据。客户端仅允许完成 `rekognition:StartFaceLivenessSession`，创建会话、读取生体结果、Collection 操作留在后端。前端只向用户 API 交回 session ID，后端自行核验得分和参考图。
-4. 验证 SES 发件域名及 DKIM，配置 SPF/DMARC，申请离开沙箱。创建 Configuration Set 和 SNS 事件目标，至少启用 SEND、DELIVERY、BOUNCE、COMPLAINT、REJECT/RENDERING_FAILURE。配置 API 的 `https://<host>/v1/mail/webhooks` 为 HTTPS 订阅端点。后端验证签名及允许的 Topic 后使用 ConfirmSubscription 确认订阅。
+4. 配置 SMTP 并执行 `npm run check:smtp`，验证加密连接和邮箱认证。
 5. 创建对称 KMS 密钥和 Secrets Manager Secret，赋予后端角色最小权限。
-6. 设置环境变量和生产正式同意文面，在已验证测试收件人/SES 模拟邮箱上验证成功、退信、限流和超时处理，再进行正式用户联调。
+6. 设置环境变量和生产正式同意文面，在指定测试邮箱验证实际收件，再进行正式用户联调。
 
 ## 密钥配置
 
@@ -61,8 +57,6 @@ KMS GenerateDataKey 产生数据键，AES-256-GCM 加密内容，数据库只保
 | --- | --- | --- |
 | Rekognition | `CreateFaceLivenessSession`、`GetFaceLivenessSessionResults`、`DetectFaces` | 使用该账户和指定 Region；这些操作按 AWS 支持的资源权限配置 |
 | Rekognition Collection | `IndexFaces`、`SearchFacesByImage`、`DeleteFaces`、`ListFaces` | 仅本应用 Collection ARN |
-| SES | `SendEmail` | 已验证发件身份，限制 From 地址；不赋予修改整个账户的权限 |
-| SNS | `ConfirmSubscription` | 配信 Topic ARN |
 | KMS | `GenerateDataKey`、`Decrypt` | 指定 Key ARN，绑定本应用加密上下文 |
 | Secrets Manager | `GetSecretValue` | 指定 Secret ARN；Secret 使用自定义 KMS 时相应允许 Decrypt |
 
@@ -72,8 +66,6 @@ KMS GenerateDataKey 产生数据键，AES-256-GCM 加密内容，数据库只保
 
 CreateFaceLivenessSession 使用 `AuditImagesLimit=0`，不设置 S3 OutputConfig，参考图由 GetFaceLivenessSessionResults 以 bytes 返回，仅在加密短期进程内存 中处理，不持久化原图。[AWS 生体会话结果](https://docs.aws.amazon.com/rekognition/latest/APIReference/API_GetFaceLivenessSessionResults.html)。AWS 生体会话自身约 3 分钟失效，[会话有效期](https://docs.aws.amazon.com/rekognition/latest/APIReference/API_CreateFaceLivenessSession.html)。
 
-SES SDK 的重试设为 1 次调用；应用对明确限流最多重试 2 次，对网络超时等结果未知请求不自动重发。邮件 tag `anshin_delivery_id` 用于把签名通知关联到对应宛先，不放用户姓名、邮箱或脸部数据。SES SendEmail API 没有可供本应用使用的客户端幂等键，[API 结构](https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_SendEmail.html)。
-
-Webhook 校验 SNS 签名、证书 URL、配置 Topic ARN、15 分钟时间窗口和事件 ID，原始 payload 不入库。[SNS 签名要求](https://docs.aws.amazon.com/sns/latest/dg/sns-verify-signature-of-message.html)。延迟过久的通知会拒绝，应配合 AWS 投递重试、告警与人工核对；不能通过关闭签名验证来恢复配信状态。
+SMTP 对明确临时拒绝或连接前失败最多追加两次尝试，发送途中结果未知时不自动重发。SMTP 当前只记录服务器受理，不通过 SNS 更新送达状态；说明见 [SMTP 邮件接入](MAIL_SMTP.md)。
 
 正式同意文面需明确 AWS 的脸部特征存储、使用 Region、委托处理和删除方式。当前 `dev-v1` 仅用于本地接口验证。

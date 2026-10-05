@@ -3,17 +3,8 @@ import {
   SendEmailCommand,
 } from "@aws-sdk/client-sesv2";
 
-export class MailFailure extends Error {
-  constructor(
-    code,
-    { uncertain = false, retryable = false } = {},
-  ) {
-    super(code);
-    this.code = code;
-    this.uncertain = uncertain;
-    this.retryable = retryable;
-  }
-}
+import { MailFailure } from '../mail-failure.js';
+export { MailFailure } from '../mail-failure.js';
 
 export class AwsMailProvider {
   name = "aws-ses";

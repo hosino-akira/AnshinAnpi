@@ -1,6 +1,6 @@
 # Node.js 用户端后端
 
-使用 Node.js 22+、Fastify、PostgreSQL，实现开发规格书第 4～11 章的用户端接口。AWS 接入采用 SDK v3：Rekognition 负责生体检测和脸部识别、SES 负责单宛先邮件、KMS 负责持久化个人数据加密，Secrets Manager 管理生产环境密钥。
+使用 Node.js 22+、Fastify、PostgreSQL，实现开发规格书第 4～11 章的用户端接口。邮件使用 SMTP/Nodemailer 单宛先发送；AWS SDK v3 的 Rekognition 负责生体检测和脸部识别，KMS 负责持久化个人数据加密，Secrets Manager 管理生产环境密钥。
 
 ## 本地启动
 
@@ -60,6 +60,8 @@ docker compose -f compose.yaml -f compose.aws-local.yaml up -d --no-deps --force
 需要 AWS 时，后续重建 API 继续带这两个 `-f` 参数；只使用普通 `docker compose up` 或 backend.ps1 start 会恢复基础配置，移除凭据挂载。登录会话到期后需要重新登录；容器凭据成功不代表 Collection 或邮件权限已经配置完成。本地覆盖配置仅用于开发，云部署使用运行角色。
 ## AWS 接入信息
 
+SMTP 服务器、邮箱密码、TLS 检查及测试发信命令见 [SMTP 邮件接入](docs/MAIL_SMTP.md)。当前使用樱花邮箱 SMTP，不需要 AWS SES 身份或发送权限。
+
 本机配置 `AWS_PROFILE`、`AWS_REGION`、`AWS_REKOGNITION_REGION` 和
 `AWS_REKOGNITION_COLLECTION_ID` 后，在 `backend` 目录执行：
 
@@ -83,13 +85,21 @@ npm run check:rekognition:liveness
 
 - AWS 账户与 Region；本机 AWS CLI Profile 名称，或部署时的 IAM Role ARN。
 - Rekognition Collection ID、支持 Face Liveness 的 Region，以及前端使用的 Cognito Identity Pool ID/受控临时凭据来源。
-- SES 已验证的发件地址或域名、沙箱状态、Configuration Set、SNS Topic ARN。
+- SMTP 主机、端口、TLS 模式、用户名、密码和发件地址。
 - KMS 对称密钥 ARN、Secrets Manager Secret ARN。
-- 对外 HTTPS API 地址与允许访问的前端 Origin，供 SNS 回调和跨域配置使用。
+- 对外 HTTPS API 地址与允许访问的前端 Origin，供跨域配置使用。
 
 Access Key/Secret Key 不需要发送到聊天。SDK 使用默认凭据链读取本机 Profile，云上优先使用 IAM Role。Docker 不自动挂载主机 `.aws`；本地需要调用 AWS 时可在主机运行 Node，或按部署环境提供受控凭据。
 
 ## 验证
+
+### 本地接口联调日志
+
+在根目录 `.env` 设置 `API_DEBUG_LOG_ENABLED=true` 并重启 API。每次业务请求的原始参数（校验前）、响应、HTTP 状态、耗时、请求编号和评分同时写入终端及 `backend/logs/api-requests.jsonl`。根目录运行 `.\scripts\watch-api-log.ps1` 可实时查看格式化记录。不依赖前端开发者工具。
+
+照片 Base64 替换为长度、解码大小及是否包含 data URL 前缀；认证令牌和密码隐藏。其他业务字段仅用于本地联调，生产环境强制关闭。日志不进入 Git；达到 10 MiB 时轮转到 `.jsonl.1`，保留最近两份。健康检查、OpenAPI 和原始邮件回调不记录。
+
+照片评分包括 `face_confidence`、`brightness`、`sharpness`、`yaw`、`pitch`、`roll`；质量失败时附带 `failed_checks` 和门槛。照片采集没有人脸相似度，二次比对和识别时查看 `similarity_score`。参数错误返回 `validation_errors`，指出出错字段及校验类型，不包含原始照片或密钥。关闭联调日志使用 `API_DEBUG_LOG_ENABLED=false` 后重启。
 
 ```powershell
 # backend 目录：密码学、输入规则、SNS 签名及 AWS 适配层单元测试

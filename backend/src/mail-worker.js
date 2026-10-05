@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { transaction } from './db.js';
 import { audit } from './audit.js';
-import { MailFailure } from './providers/aws-mail.js';
+import { MailFailure } from './mail-failure.js';
 
 export async function updateCheck(db, checkId) {
   if (!checkId) return;
@@ -22,8 +22,8 @@ export class MailWorker {
   async claim() {
     return transaction(this.pool, async db => {
       const delivery = (await db.query(`SELECT d.delivery_id FROM mail_deliveries d
-        WHERE d.status='queued' AND d.attempt_count<3 AND (d.next_attempt_at IS NULL OR d.next_attempt_at<=clock_timestamp())
-        ORDER BY d.created_at LIMIT 1 FOR UPDATE OF d SKIP LOCKED`)).rows[0];
+        WHERE d.status='queued' AND d.provider=$1 AND d.attempt_count<3 AND (d.next_attempt_at IS NULL OR d.next_attempt_at<=clock_timestamp())
+        ORDER BY d.created_at LIMIT 1 FOR UPDATE OF d SKIP LOCKED`, [this.mail.name])).rows[0];
       if (!delivery) return null;
       await db.query(`UPDATE mail_deliveries SET status='sending',sending_started_at=clock_timestamp(),
         attempt_count=attempt_count+1,last_attempt_at=clock_timestamp(),next_attempt_at=NULL WHERE delivery_id=$1`, [delivery.delivery_id]);
@@ -39,7 +39,7 @@ export class MailWorker {
       const recipient = (await db.query('SELECT * FROM recipients WHERE recipient_id=$1 FOR SHARE', [metadata.recipient_id])).rows[0];
       const check = (await db.query('SELECT * FROM safety_checks WHERE check_id=$1 FOR UPDATE', [metadata.check_id])).rows[0];
       const delivery = (await db.query('SELECT * FROM mail_deliveries WHERE delivery_id=$1 FOR UPDATE', [id])).rows[0];
-      if (!delivery || delivery.status !== 'sending') return;
+      if (!delivery || delivery.status !== 'sending' || delivery.provider !== this.mail.name) return;
       const terminal = check && (await db.query('SELECT * FROM terminals WHERE terminal_id=$1 FOR SHARE', [check.terminal_id])).rows[0];
       const consent = check && (await db.query('SELECT * FROM consents WHERE consent_id=$1 FOR SHARE', [check.consent_id])).rows[0];
       const withdrawn = user && (await db.query(`SELECT 1 FROM consents WHERE user_id=$1 AND result='withdrawn'
@@ -70,7 +70,7 @@ export class MailWorker {
     });
   }
   async maintain() {
-    // Reclaiming a crashed SES request by re-sending would risk a duplicate email.
+    // Re-sending after a crashed provider request would risk a duplicate email.
     const stale = (await this.pool.query(`SELECT delivery_id,check_id FROM mail_deliveries WHERE status='sending'
       AND sending_started_at < clock_timestamp()-interval '45 seconds'`)).rows;
     for (const row of stale) await transaction(this.pool, async db => {

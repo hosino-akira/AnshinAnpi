@@ -23,6 +23,7 @@ __pycache__/
 .vercel/
 *.log
 *.log.*
+/backend/logs/
 
 # Local configuration and private keys
 .env*

@@ -8,7 +8,8 @@ import { TemporaryStore } from '../../src/temporary-store.js';
 import { createApp } from '../../src/app.js';
 import { ensureSingleTerminal, SINGLE_TERMINAL_CODE, SINGLE_TERMINAL_ID } from '../../src/single-terminal.js';
 import { MailWorker } from '../../src/mail-worker.js';
-import { MailFailure } from '../../src/providers/aws-mail.js';
+import { MailFailure } from '../../src/mail-failure.js';
+import { SmtpMailProvider } from '../../src/providers/smtp-mail.js';
 import { auditDigest } from '../../src/audit.js';
 
 if (!/^anshin_api_test_[a-zA-Z0-9_]+$/.test(process.env.TEST_DATABASE_NAME ?? '')) throw new Error('TEST_DATABASE_NAME must name an isolated anshin_api_test_* database');
@@ -464,4 +465,70 @@ test('unconfigured registration mail rolls back verification changes and can be 
   await worker.tick();
   const result=await success('GET',`/v1/mail-results/${retried.check_id}`,undefined,retried.user_id);
   assert.equal(result.registration_completed,true);
+});
+
+test('registration queue sends through SMTP and never repeats accepted recipients',async()=>{
+  const user=await captureAndRegister('smtp-adapter',[{name:'A',email:'smtp-a@example.com'},{name:'B',email:'smtp-b@example.com'}]);
+  const verified=await success('POST','/v1/registrations/verify',{...photoPayload,user_id:user.user_id},user.user_id);
+  const inputs=[];
+  const provider=new SmtpMailProvider({smtpHost:'smtp.example.com',smtpPort:587,smtpUser:'sender@example.com',smtpPassword:'test-only',smtpFrom:'sender@example.com',contactAddress:'staff'}, {
+    sendMail:async input=>{inputs.push(input);return {messageId:input.messageId,accepted:input.envelope.to,rejected:[]};}
+  });
+  const originalSend=mail.send;
+  mail.send=provider.send.bind(provider);
+  try {
+    await worker.tick();
+    const result=await success('GET',`/v1/mail-results/${verified.check_id}`,undefined,user.user_id);
+    assert.equal(result.registration_completed,true);
+    assert.equal(result.mail_status,'accepted');
+    assert.deepEqual(inputs.map(input=>input.envelope.to),[['smtp-a@example.com'],['smtp-b@example.com']]);
+    assert.ok(inputs.every(input=>input.subject.includes('連絡先登録')));
+    assert.deepEqual(inputs.map(input=>input.headers['X-Anshin-Delivery-Id']),result.recipient_results.map(row=>row.delivery_id));
+    await worker.tick();
+    assert.equal(inputs.length,2);
+  } finally {mail.send=originalSend;}
+});
+
+test('SMTP authentication rejection is recorded as failed rather than accepted or uncertain',async()=>{
+  const user=await captureAndRegister('smtp-permission');
+  const verified=await success('POST','/v1/registrations/verify',{...photoPayload,user_id:user.user_id},user.user_id);
+  let attempts=0;
+  const provider=new SmtpMailProvider({smtpHost:'smtp.example.com',smtpPort:587,smtpUser:'sender@example.com',smtpPassword:'test-only',smtpFrom:'sender@example.com',contactAddress:'staff'}, {
+    sendMail:async()=>{attempts++;throw {code:'EAUTH',responseCode:535};}
+  });
+  const originalSend=mail.send;
+  mail.send=provider.send.bind(provider);
+  try {
+    await worker.tick();
+    const result=await success('GET',`/v1/mail-results/${verified.check_id}`,undefined,user.user_id);
+    assert.equal(result.registration_completed,false);
+    assert.equal(result.mail_status,'failed');
+    assert.equal(result.recipient_results[0].error_code,'MAIL_AUTH_REQUIRED');
+    await worker.tick();
+    assert.equal(attempts,1);
+  } finally {mail.send=originalSend;}
+});
+
+test('mail worker does not switch queued deliveries from another provider to SMTP',async()=>{
+  const user=await captureAndRegister('provider-isolation');
+  const verified=await success('POST','/v1/registrations/verify',{...photoPayload,user_id:user.user_id},user.user_id);
+  await pool.query("UPDATE mail_deliveries SET provider='legacy-mail' WHERE check_id=$1",[verified.check_id]);
+  const baseline=mail.sends.length;
+  await worker.tick();
+  assert.equal(mail.sends.length,baseline);
+  const result=await success('GET',`/v1/mail-results/${verified.check_id}`,undefined,user.user_id);
+  assert.equal(result.recipient_results[0].status,'queued');
+  await pool.query('UPDATE mail_deliveries SET provider=$2 WHERE check_id=$1',[verified.check_id,mail.name]);
+  await worker.tick();
+  assert.equal(mail.sends.length,baseline+1);
+});
+
+test('SNS callbacks cannot alter SMTP mail records',async()=>{
+  const previousName=mail.name;
+  mail.name='smtp';
+  try {
+    const response=await request('POST','/v1/mail/webhooks',{});
+    assert.equal(response.status,503);
+    assert.equal(response.body.error.code,'SERVICE_NOT_CONFIGURED');
+  } finally {mail.name=previousName;}
 });

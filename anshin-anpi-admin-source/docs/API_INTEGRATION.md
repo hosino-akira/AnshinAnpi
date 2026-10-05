@@ -48,6 +48,6 @@ ANSHIN_BACKEND_URL=http://127.0.0.1:3002
 
 照片为 JPEG/PNG 纯 Base64，解码后最大 512 KiB；摄像头/测试页缩小到最长边 1024 后压缩。图片模式不检测活体，不需 Cognito。没有候选的评分为 null；HTTP 200 还需检查 matched/result，不能直接当识别成功。
 
-此前检查的旧地区 us-east-1 中 Collection 不存在，SES 未配置且工作进程关闭。现使用东京 ap-northeast-1，真实完整测试应以主目录当前 AWS 配置重新验证人脸与邮件资源；旧地区结果不代表东京资源状态。数据库和公开文面接口可先联调，接口不会模拟 AWS/邮件成功。
+人脸识别使用东京 ap-northeast-1 的 AWS Rekognition，邮件通过樱花 SMTP 发送。SMTP 配置及检查命令见 [后端 SMTP 说明](../../backend/docs/MAIL_SMTP.md)。人脸和邮件需分别验证；接口不会模拟成功。
 
 用户端不使用 Authorization，注册/识别返回 user_id。发送完成页显示请求提交成功，不查询或展示邮件投递、退信或异步失败。

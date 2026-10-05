@@ -78,7 +78,8 @@ function responseSchemas() {
   const session={expires_at:{type:'string',format:'date-time'}};
   const mail={check_id:uuid,mail_status:text,recipient_results:recipients,user_id:uuid,user_status:text,registration_completed:flag};
   return {
-    Metrics:object({similarity_score:nullableScore,match_threshold:nullableScore,face_confidence:nullableScore,brightness:nullableScore,sharpness:nullableScore,liveness_passed:flag,liveness_score:nullableScore},['liveness_passed']),
+    Metrics:object({similarity_score:nullableScore,match_threshold:nullableScore,face_confidence:nullableScore,brightness:nullableScore,sharpness:nullableScore,
+      yaw:{type:['number','null']},pitch:{type:['number','null']},roll:{type:['number','null']},liveness_passed:flag,liveness_score:nullableScore},['liveness_passed']),
     RecipientResult:object({delivery_id:uuid,recipient_id:uuid,status:text,error_code:{type:['string','null']},attempt_count:{type:'integer'}},['delivery_id','recipient_id','status']),
     Policy:object({policy_version:text,title:text,body:text},['policy_version','title','body']),
     CaptureResult:object({temp_id:uuid,face_valid:flag,expires_at:session.expires_at,idle_timeout_seconds:{type:'integer'},metrics},['temp_id','face_valid','expires_at','idle_timeout_seconds','metrics']),

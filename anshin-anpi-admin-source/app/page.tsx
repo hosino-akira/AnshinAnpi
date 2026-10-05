@@ -1344,7 +1344,7 @@ export default function Home() {
             <ScreenTitle
               kicker="初回登録 4 / 8"
               title="メールを送る相手を登録します"
-              description="1名は必須、2名まで登録できます。現在は顔登録のテストです。確認メールはまだ送信しません。"
+              description="1名は必須、2名まで登録できます。登録後にもう一度顔を確認すると、登録通知メールを送信します。"
             />
             <div className="contacts-grid">
               {[0, ...(useSecondRecipient ? [1] : [])].map(
@@ -1791,7 +1791,7 @@ export default function Home() {
           <div className="completion-screen">
             <div className="completion-icon"><CheckCircle2 /></div>
             <p>安否確認 5 / 5</p>
-            <h1>送信成功</h1>
+            <h1>送信受付完了</h1>
             <p>安否通知の送信を受け付けました。</p>
             <p className="bar-countdown">自動終了まで <strong>{completeSeconds}秒</strong></p>
             <Button className="touch-button primary-button" onClick={goHome}>ホームへ戻る</Button>

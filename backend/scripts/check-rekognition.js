@@ -44,7 +44,5 @@ try {
 } finally {
   await app?.close();
   await runtime?.close();
-  runtime?.face.client.destroy();
-  runtime?.mail.client.destroy();
   client.destroy();
 }

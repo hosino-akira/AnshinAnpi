@@ -60,6 +60,7 @@ export async function verifySns(message, config, certificateLoader = getCertific
 
 export function createWebhookHandler(deps) {
   return async (request, reply) => {
+    if (deps.mail.name === 'smtp') unavailable('メール配信通知');
     const notification = request.body;
     await (deps.webhookVerifier ?? verifySns)(notification, deps.config);
     if (notification.Type === 'SubscriptionConfirmation') {

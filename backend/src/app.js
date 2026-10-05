@@ -9,6 +9,7 @@ import { idempotent } from './idempotency.js';
 import { UserService } from './user-service.js';
 import { createWebhookHandler } from './webhook.js';
 import { openApiDocument } from './openapi.js';
+import { installRequestLog } from './request-log.js';
 
 export async function createApp(deps) {
   const { config, pool, store } = deps;
@@ -21,6 +22,7 @@ export async function createApp(deps) {
     allowedHeaders: ['Content-Type','Authorization','X-Terminal-Id','X-Terminal-Token','Idempotency-Key'],
     exposedHeaders: ['X-Request-Id','Idempotency-Replayed','Retry-After'] });
   installErrorHandler(app);
+  installRequestLog(app, { enabled: config.apiDebugLogEnabled, production: config.production });
   app.addHook('onSend', async (request, reply, payload) => {
     reply.header('Cache-Control', 'no-store').header('Pragma', 'no-cache').header('X-Request-Id', request.id);
     return payload;

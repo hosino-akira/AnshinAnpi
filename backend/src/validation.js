@@ -4,7 +4,7 @@ export const uuid = z.uuid();
 export const displayName = z.string().normalize('NFKC').trim().min(1).max(50)
   .refine(value => !/[<>\u0000-\u001f\u007f]/u.test(value), 'Invalid name');
 export const email = z.string().trim().toLowerCase().max(254).email()
-  .refine(value => /^[\x21-\x7e]+$/.test(value), 'ASCII email required for SES');
+  .refine(value => /^[\x21-\x7e]+$/.test(value), 'ASCII email required');
 export const recipient = z.strictObject({ name: displayName, email });
 export const recipients = z.array(recipient).min(1).max(2).refine(values => new Set(values.map(x => x.email)).size === values.length, 'Duplicate recipients');
 export const bodySchemas = {

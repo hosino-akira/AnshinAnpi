@@ -24,8 +24,14 @@ export function installErrorHandler(app) {
       code = status === 413 ? 'PAYLOAD_TOO_LARGE' : status === 400 ? 'VALIDATION_ERROR' : 'SYS-001';
       message = status === 500 ? '処理を完了できませんでした。' : 'リクエストをご確認ください。';
     }
-    // Do not log SQL, exception text, request bodies, tokens, images, or addresses.
+    const validationDetails = error.name === 'ZodError' ? { validation_errors: error.issues.map(issue => ({
+      path: issue.path.join('.'), code: issue.code,
+      ...(issue.expected ? { expected: issue.expected } : {}),
+      ...(issue.keys ? { fields: issue.keys } : {}),
+    })) } : undefined;
+    // Normal error logs omit private values; opt-in local exchange logs redact photos and secrets.
     request.log[status >= 500 ? 'error' : 'info']({ requestId: request.id, errorCode: code, status }, 'request_failed');
-    reply.code(status).send({ error: { code, message, request_id: request.id, ...(error.details ? { details: error.details } : {}) } });
+    const details = error.details ?? validationDetails;
+    reply.code(status).send({ error: { code, message, request_id: request.id, ...(details ? { details } : {}) } });
   });
 }

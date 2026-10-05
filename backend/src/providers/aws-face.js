@@ -73,10 +73,18 @@ export class AwsFaceProvider {
       if (detection.FaceDetails?.length !== 1) fail(422, detection.FaceDetails?.length ? 'FACE-002' : 'FACE-001', 'お一人でカメラに映ってください。');
       const face = detection.FaceDetails[0];
       const metrics = { face_confidence: face.Confidence ?? null,
-        brightness: face.Quality?.Brightness ?? null, sharpness: face.Quality?.Sharpness ?? null };
-      if ((face.Confidence ?? 0) < 99 || (face.Quality?.Brightness ?? 0) < 40 || (face.Quality?.Sharpness ?? 0) < 40
-        || Math.abs(face.Pose?.Yaw ?? 180) > 30 || Math.abs(face.Pose?.Pitch ?? 180) > 30 || Math.abs(face.Pose?.Roll ?? 180) > 30) {
-        fail(422, 'FACE_QUALITY_FAILED', '顔の向きや明るさを調整し、もう一度お試しください。', metrics);
+        brightness: face.Quality?.Brightness ?? null, sharpness: face.Quality?.Sharpness ?? null,
+        yaw: face.Pose?.Yaw ?? null, pitch: face.Pose?.Pitch ?? null, roll: face.Pose?.Roll ?? null };
+      const failedChecks = [];
+      if ((metrics.face_confidence ?? 0) < 99) failedChecks.push('face_confidence');
+      if ((metrics.brightness ?? 0) < 40) failedChecks.push('brightness');
+      if ((metrics.sharpness ?? 0) < 40) failedChecks.push('sharpness');
+      for (const angle of ['yaw', 'pitch', 'roll']) if (Math.abs(metrics[angle] ?? 180) > 30) failedChecks.push(angle);
+      if (failedChecks.length) {
+        fail(422, 'FACE_QUALITY_FAILED', '顔の向きや明るさを調整し、もう一度お試しください。', {
+          ...metrics, failed_checks: failedChecks,
+          thresholds: { face_confidence_min: 99, brightness_min: 40, sharpness_min: 40, pose_abs_max: 30 },
+        });
       }
       return metrics;
   }
