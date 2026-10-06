@@ -10,16 +10,19 @@ import { UserService } from './user-service.js';
 import { createWebhookHandler } from './webhook.js';
 import { openApiDocument } from './openapi.js';
 import { installRequestLog } from './request-log.js';
+import { initializeAdminSettings } from './admin-settings.js';
+import { registerAdmin } from './admin-service.js';
 
 export async function createApp(deps) {
   const { config, pool, store } = deps;
   const singleTerminal = await ensureSingleTerminal(pool);
+  await initializeAdminSettings(deps);
   const app = Fastify({ logger: deps.logger ?? { level: config.logLevel, redact: ['req.headers.authorization', 'req.headers["x-terminal-token"]', 'req.body'] },
     genReqId: () => randomUUID(), logController: new LogController({ disableRequestLogging: true }), bodyLimit: 1024 * 1024,
     requestTimeout: 30000, trustProxy: false });
   await app.register(helmet);
-  await app.register(cors, { origin: config.corsOrigins, credentials: false, methods: ['GET','POST','PUT','PATCH','DELETE'],
-    allowedHeaders: ['Content-Type','Authorization','X-Terminal-Id','X-Terminal-Token','Idempotency-Key'],
+  await app.register(cors, { origin: config.corsOrigins, credentials: true, methods: ['GET','POST','PUT','PATCH','DELETE'],
+    allowedHeaders: ['Content-Type','Authorization','X-Terminal-Id','X-Terminal-Token','Idempotency-Key','X-CSRF-Token'],
     exposedHeaders: ['X-Request-Id','Idempotency-Replayed','Retry-After'] });
   installErrorHandler(app);
   installRequestLog(app, { enabled: config.apiDebugLogEnabled, production: config.production });
@@ -39,6 +42,7 @@ export async function createApp(deps) {
   });
   app.post('/v1/mail/webhooks', createWebhookHandler(deps));
   const service = new UserService(deps);
+  await registerAdmin(app, deps);
 
   // Published policies are displayed before authentication; this route returns
   // document content and version only, without private user records.

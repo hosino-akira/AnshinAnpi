@@ -4,7 +4,8 @@ import { openApiDocument } from '../src/openapi.js';
 
 test('single-robot contract requires no device secrets and uses user IDs while keeping idempotency', () => {
   const doc = openApiDocument();
-  assert.deepEqual(Object.keys(doc.components.securitySchemes), []);
+  assert.deepEqual(Object.keys(doc.components.securitySchemes), ['AdminCookie']);
+  assert.deepEqual(doc.paths['/v1/admin/dashboard'].get.security, [{ AdminCookie: [] }]);
   assert.deepEqual(doc.paths['/v1/registrations/capture'].post.security, []);
   assert.deepEqual(doc.paths['/v1/registrations/verify'].post.security, []);
   assert.deepEqual(doc.paths['/v1/mail-results/{id}'].get.security, []);

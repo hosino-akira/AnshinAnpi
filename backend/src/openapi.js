@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { bodySchemas } from './validation.js';
+import { adminSchemas, adminRoutes } from './admin-service.js';
 
 const routes = [
   ['post','/v1/registrations/capture','注册① 检查照片并返回临时 ID','photoCapture',201],
@@ -60,12 +61,25 @@ export function openApiDocument() {
     if (path.startsWith('/v1/mail-results')) { paths[path][method].deprecated=true; paths[path][method].description='后端诊断保留接口。用户端不调用；管理端之后单独对接。'; }
     if (path.startsWith('/v1/enrollments') || path.startsWith('/v1/safety-checks') || path.startsWith('/v1/users/me') || path==='/v1/faces/verify-registration') paths[path][method].deprecated=true;
     if (['photoCapture','registrationVerification'].includes(body)) paths[path][method].description='照片为 JPEG/PNG 的纯 Base64，解码后最多 512 KiB；图片模式不检测活体。比对通过自动入队登记通知，并返回 check_id 和 send_requested=true。';
+    if (path==='/v1/registrations/capture' || path==='/v1/registrations') paths[path][method].description =
+      (paths[path][method].description ?? '') + ' 仅与注册成功的 active 用户高度匹配时返回 409 FACE_ALREADY_REGISTERED；未完成的 pending_registration 不阻止重新登记，也不参与安否识别。不因姓名不同而允许已完成用户重复登记。';
     if (path==='/v1/faces/liveness-sessions') paths[path][method].description='purpose=registration 时必须提供 user_id；enrollment 时须提供 enrollment_id。AWS Face Liveness 视频使用专用前端组件直接提交。';
     if (body==='face') paths[path][method].description='二选一：image_base64（JPEG/PNG，解码后不超过512 KiB，不含 data URL 前缀）或 liveness_session_id。图片模式不检测活体。返回 metrics，分数为0–100；无可用候选时 similarity_score 为 null。登记接口仅返回图片质量指标。';
     if (path.endsWith('/webhooks')) paths[path][method].description='SNS 签名、Topic ARN、时间窗口和事件 ID 均由后端校验，不接受未签名客户端配信状态。';
   }
-  return { openapi:'3.1.0',info:{ title:'安心安否確認 用户端 API',version:'0.4.0' },servers:[{ url:'http://192.168.0.51:3002',description:'局域网开发后端（地址可能随 DHCP 改变）' },{url:'http://localhost:3002'}],paths,
-    components:{ securitySchemes:{},
+  for (const [method,path,summary,body] of adminRoutes) {
+    const parameters=[...path.matchAll(/\{([^}]+)\}/g)].map(([,name])=>({name,in:'path',required:true,schema:{type:'string'}}));
+    if (method!=='get' && path!=='/v1/admin/login') parameters.push(
+      {name:'X-CSRF-Token',in:'header',required:true,schema:{type:'string'}},
+      {name:'Idempotency-Key',in:'header',required:true,schema:{type:'string',maxLength:100}});
+    const responses={200:{description:'成功'}};
+    for (const status of [400,401,403,404,409,429,503]) responses[status]={description:'错误',content:{'application/json':{schema:{$ref:'#/components/schemas/Error'}}}};
+    paths[path]??={};
+    paths[path][method]={summary,tags:['管理端'],parameters,responses,security:path==='/v1/admin/login' ? [] : [{AdminCookie:[]}],
+      ...(body ? {requestBody:{required:true,content:{'application/json':{schema:z.toJSONSchema(adminSchemas[body],{io:'input',unrepresentable:'any'})}}}} : {})};
+  }
+  return { openapi:'3.1.0',info:{ title:'安心安否確認 用户端・管理端 API',version:'0.5.0' },servers:[{ url:'http://192.168.0.51:3002',description:'局域网开发后端（地址可能随 DHCP 改变）' },{url:'http://localhost:3002'}],paths,
+    components:{ securitySchemes:{AdminCookie:{type:'apiKey',in:'cookie',name:'anshin_admin'}},
     schemas:{ ...responseSchemas(), Error:{ type:'object',required:['error'],properties:{ error:{ type:'object',required:['code','message','request_id'],
       properties:{ code:{ type:'string' },message:{ type:'string' },request_id:{ type:'string',format:'uuid' },details:{ type:'object' } } } } } } } };
 }

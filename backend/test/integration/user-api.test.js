@@ -532,3 +532,188 @@ test('SNS callbacks cannot alter SMTP mail records',async()=>{
     assert.equal(response.body.error.code,'SERVICE_NOT_CONFIGURED');
   } finally {mail.name=previousName;}
 });
+
+test('first capture rejects only completed registrations without exposing identity or creating drafts', async () => {
+  const baseline = (await pool.query('SELECT count(*) AS n FROM users')).rows[0].n;
+  const indexes = face.indexCalls;
+  for (const label of ['person-a']) {
+    identity = label;
+    const result = await request('POST', '/v1/registrations/capture', photoPayload);
+    assert.equal(result.status, 409);
+    assert.equal(result.body.error.code, 'FACE_ALREADY_REGISTERED');
+    assert.equal(result.body.error.details.similarity_score, 99.9);
+    assert.equal(result.body.temp_id, undefined);
+    assert.equal(result.body.error.details.user_id, undefined);
+    assert.equal(result.body.error.details.display_name, undefined);
+  }
+  assert.equal((await pool.query('SELECT count(*) AS n FROM users')).rows[0].n, baseline);
+  assert.equal(face.indexCalls, indexes);
+});
+
+test('first capture admits a new face when AWS returns existing users below the matching threshold', async () => {
+  const candidates = [...face.references].map(([userId, ref]) => ({ userId, faceId: ref.faceId, score: 0.98 }));
+  assert.ok(candidates.length > 0);
+  const before = (await pool.query('SELECT count(*) AS n FROM users')).rows[0].n;
+  const indexes = face.indexCalls;
+  identity = 'new-person-with-low-similarity';
+  face.override = candidates;
+  let draft;
+  try {
+    draft = await success('POST', '/v1/registrations/capture', photoPayload);
+    assert.equal(draft.face_valid, true);
+    assert.ok(draft.temp_id);
+    assert.equal((await pool.query('SELECT count(*) AS n FROM users')).rows[0].n, before);
+    assert.equal(face.indexCalls, indexes);
+  } finally {
+    face.override = null;
+    if (draft) await success('DELETE', `/v1/registrations/${draft.temp_id}`, {});
+  }
+});
+
+test('pending registrations do not block retry, but completing one blocks subsequent registration', async () => {
+  identity = 'duplicate-race';
+  const first = await success('POST', '/v1/registrations/capture', photoPayload);
+  const second = await success('POST', '/v1/registrations/capture', photoPayload);
+  const before = (await pool.query('SELECT count(*) AS n FROM users')).rows[0].n;
+  const indexes = face.indexCalls;
+  const body = temp_id => ({ temp_id, display_name: 'Same name', recipients: [{ name: 'Contact', email: 'race@example.com' }],
+    policy_version: 'test-v1', consent_result: 'granted' });
+  const results = await Promise.all([
+    request('POST', '/v1/registrations', body(first.temp_id)),
+    request('POST', '/v1/registrations', { ...body(second.temp_id), display_name: 'Another name' }),
+  ]);
+  assert.deepEqual(results.map(result => result.status), [201, 201]);
+  assert.equal((await pool.query('SELECT count(*) AS n FROM users')).rows[0].n, String(Number(before) + 2));
+  assert.equal(face.indexCalls, indexes + 2);
+  const unregistered = await success('POST', '/v1/faces/identify', photoPayload);
+  assert.equal(unregistered.result, 'no_match');
+  assert.equal(unregistered.user_id, undefined);
+  const retry = await success('POST', '/v1/registrations/capture', photoPayload);
+  const registered = results[0].body;
+  await success('POST', '/v1/registrations/verify', { ...photoPayload, user_id: registered.user_id }, registered.user_id);
+  await worker.tick();
+  assert.equal((await pool.query('SELECT status FROM users WHERE user_id=$1', [registered.user_id])).rows[0].status, 'active');
+  const recognized = await success('POST', '/v1/faces/identify', photoPayload);
+  assert.equal(recognized.result, 'matched');
+  assert.equal(recognized.user_id, registered.user_id);
+  const indexesAfterCompletion = face.indexCalls;
+  const duplicate = await request('POST', '/v1/registrations', body(retry.temp_id));
+  assert.equal(duplicate.status, 409);
+  assert.equal(duplicate.body.error.code, 'FACE_ALREADY_REGISTERED');
+  assert.equal(face.indexCalls, indexesAfterCompletion);
+  const capture = await request('POST', '/v1/registrations/capture', photoPayload);
+  assert.equal(capture.status, 409);
+  assert.equal(capture.body.error.code, 'FACE_ALREADY_REGISTERED');
+  await success('DELETE', `/v1/registrations/${retry.temp_id}`, {});
+});
+
+test('an abandoned registration and a failed registration mail permit first capture and stay excluded from safety recognition', async () => {
+  identity = 'abandoned-first-capture';
+  const first = await success('POST', '/v1/registrations/capture', photoPayload);
+  await success('DELETE', `/v1/registrations/${first.temp_id}`, {});
+  const retry = await success('POST', '/v1/registrations/capture', photoPayload);
+  await success('DELETE', `/v1/registrations/${retry.temp_id}`, {});
+  assert.equal((await success('POST', '/v1/faces/identify', photoPayload)).result, 'no_match');
+  identity = 'final-partial';
+  const existing = [...face.references].find(([, ref]) => ref.identity === identity);
+  assert.ok(existing);
+  assert.equal((await pool.query('SELECT status FROM users WHERE user_id=$1', [existing[0]])).rows[0].status, 'pending_registration');
+  const notRegistered = await success('POST', '/v1/faces/identify', photoPayload);
+  assert.equal(notRegistered.result, 'no_match');
+  assert.equal(notRegistered.user_id, undefined);
+  const newDraft = await success('POST', '/v1/registrations/capture', photoPayload);
+  assert.equal(newDraft.face_valid, true);
+  await success('DELETE', `/v1/registrations/${newDraft.temp_id}`, {});
+});
+
+test('legacy completion also rejects the same face under a different name before indexing', async () => {
+  identity = 'person-a';
+  const draft = await success('POST', '/v1/enrollments', {});
+  await success('PATCH', `/v1/enrollments/${draft.temp_id}/profile`, { display_name: 'Another name' });
+  await success('POST', `/v1/enrollments/${draft.temp_id}/consent`, { policy_version: 'test-v1', result: 'granted' });
+  await success('PUT', `/v1/enrollments/${draft.temp_id}/recipients`, { recipients: [{ name: 'Contact', email: 'legacy-duplicate@example.com' }] });
+  await success('POST', `/v1/enrollments/${draft.temp_id}/face`, photoPayload);
+  const indexes = face.indexCalls;
+  const result = await request('POST', `/v1/enrollments/${draft.temp_id}/complete`, {});
+  assert.equal(result.status, 409);
+  assert.equal(result.body.error.code, 'FACE_ALREADY_REGISTERED');
+  assert.equal(face.indexCalls, indexes);
+  await success('DELETE', `/v1/enrollments/${draft.temp_id}`, {});
+});
+
+test('business registration and safety endpoints send both templates through SMTP after the frontend session ends', async () => {
+  const inputs = [];
+  const provider = new SmtpMailProvider({ smtpHost: 'smtp.example.com', smtpPort: 587, smtpUser: 'sender@example.com',
+    smtpPassword: 'test-only', smtpFrom: 'sender@example.com', contactAddress: '施設スタッフ' }, {
+    sendMail: async input => {
+      inputs.push(input);
+      return { messageId: input.messageId, accepted: input.envelope.to, rejected: [] };
+    },
+  });
+  const previous = { name: mail.name, send: mail.send, facilityName: config.facilityName };
+  config.facilityName = '実運用施設';
+  mail.name = provider.name;
+  mail.send = provider.send.bind(provider);
+  try {
+    const contacts = [{ name: 'Family A', email: 'business-a@example.com' }, { name: 'Family B', email: 'business-b@example.com' }];
+    const user = await captureAndRegister('smtp-business-flows', contacts);
+    assert.equal(inputs.length, 0);
+    const registrationKey = randomUUID();
+    const registrationBody = { ...photoPayload, user_id: user.user_id };
+    const verified = await success('POST', '/v1/registrations/verify', registrationBody, user.user_id, { 'idempotency-key': registrationKey });
+    const replay = await success('POST', '/v1/registrations/verify', registrationBody, user.user_id, { 'idempotency-key': registrationKey });
+    assert.equal(replay.check_id, verified.check_id);
+    assert.equal((await pool.query('SELECT status FROM users WHERE user_id=$1', [user.user_id])).rows[0].status, 'pending_registration');
+    await success('DELETE', '/v1/sessions/current', {}, user.user_id);
+    await worker.tick();
+    assert.equal(inputs.length, 2);
+    assert.equal((await pool.query('SELECT status FROM users WHERE user_id=$1', [user.user_id])).rows[0].status, 'active');
+
+    const identified = await success('POST', '/v1/faces/identify', photoPayload);
+    assert.equal(identified.user_id, user.user_id);
+    const beforeConfirmation = await request('POST', '/v1/safety-notifications', { user_id: user.user_id, consent: true, policy_version: 'test-v1' }, user.user_id);
+    assert.equal(beforeConfirmation.status, 403);
+    const confirmed = await success('POST', `/v1/users/${user.user_id}/recipients`, { confirmed: true }, user.user_id);
+    const safetyKey = randomUUID();
+    const safetyBody = { user_id: user.user_id, consent: true, policy_version: confirmed.policy_version };
+    const sent = await success('POST', '/v1/safety-notifications', safetyBody, user.user_id, { 'idempotency-key': safetyKey });
+    const repeated = await success('POST', '/v1/safety-notifications', safetyBody, user.user_id, { 'idempotency-key': safetyKey });
+    assert.equal(repeated.check_id, sent.check_id);
+    await success('DELETE', '/v1/sessions/current', {}, user.user_id);
+    await worker.tick();
+    await worker.tick();
+    assert.equal(inputs.length, 4);
+    assert.deepEqual(inputs.map(input => input.envelope.to), [
+      ['business-a@example.com'], ['business-b@example.com'], ['business-a@example.com'], ['business-b@example.com'],
+    ]);
+    for (const input of inputs) {
+      assert.equal(input.envelope.from, 'sender@example.com');
+      assert.equal(input.cc, undefined);
+      assert.equal(input.bcc, undefined);
+      assert.match(input.text, /Final smtp-business-flows/);
+    }
+    assert.ok(inputs.slice(0, 2).every(input => input.subject.includes('連絡先登録') && input.text.includes('連絡先として')));
+    assert.ok(inputs.slice(2).every(input => input.subject === '【安心安否確認】Final smtp-business-flowsさんからのお知らせ'
+      && input.text.includes('本人の操作により送信された自動メールです。')
+      && input.text.includes('現在、実運用施設の端末でご本人の確認が完了しています。')));
+    for (const [index, input] of inputs.entries()) {
+      assert.ok(input.text.startsWith(`${contacts[index % 2].name} 様\n\n`));
+      assert.ok(!input.text.includes(contacts[(index + 1) % 2].name));
+      assert.doesNotMatch(input.text, /\{\{|undefined/);
+    }
+    const storedUser = (await pool.query('SELECT created_at FROM users WHERE user_id=$1', [user.user_id])).rows[0];
+    const storedCheck = (await pool.query('SELECT created_at FROM safety_checks WHERE check_id=$1', [sent.check_id])).rows[0];
+    const localTime = value => new Intl.DateTimeFormat('ja-JP', { timeZone: terminal.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(value);
+    assert.ok(inputs[0].text.includes(localTime(storedUser.created_at)));
+    assert.ok(inputs[2].text.includes(localTime(storedCheck.created_at)));
+    const deliveries = (await pool.query(`SELECT d.provider,d.status,d.provider_message_id,c.check_type
+      FROM mail_deliveries d JOIN safety_checks c USING(check_id) WHERE c.user_id=$1 ORDER BY c.created_at,d.recipient_order_no`, [user.user_id])).rows;
+    assert.deepEqual(deliveries.map(row => row.check_type), ['registration', 'registration', 'safety', 'safety']);
+    assert.ok(deliveries.every(row => row.provider === 'smtp' && row.status === 'accepted' && row.provider_message_id));
+    assert.equal(new Set(deliveries.map(row => row.provider_message_id)).size, 4);
+  } finally {
+    mail.name = previous.name;
+    mail.send = previous.send;
+    config.facilityName = previous.facilityName;
+  }
+});

@@ -1,5 +1,7 @@
 # 数据库结构：式样书 v1.0
 
+管理端迁移 `005_single_admin.sql` 和 `006_password_only_admin.sql` 保留以下八张共享业务表，仅在 `app_meta` 增加单管理员和版本化设置两张辅助表；审计记录增加用途字段，既有签名仍可校验。管理员、邮件模板和同意文面均由后端统一访问，见 [管理端说明](../backend/docs/ADMIN_API.md)。
+
 依据 `安心安否確認システム_開発仕様書_v1.0_正式版.xlsx` 的 `10_データ仕様`，第 10.1 节 A6:H13。
 PostgreSQL 的 `public` 中仅保留下列 8 张业务表。完整字段、类型、约束见 [spec-v1-schema.sql](spec-v1-schema.sql)。
 

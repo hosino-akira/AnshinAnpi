@@ -30,7 +30,7 @@ export function installRequestLog(app, { enabled = false, production = false, pa
   const exchanges = new WeakMap();
   app.addHook('onRequest', async request => {
     const url = new URL(request.raw.url, 'http://localhost');
-    if (!url.pathname.startsWith('/v1/') || url.pathname === '/v1/mail/webhooks') return;
+    if (!url.pathname.startsWith('/v1/') || url.pathname === '/v1/mail/webhooks' || url.pathname.startsWith('/v1/admin/')) return;
     exchanges.set(request, { time: new Date().toISOString(), request_id: request.id, method: request.method,
       path: url.pathname, query: sanitizeExchange(Object.fromEntries(url.searchParams)),
       headers: sanitizeExchange(Object.fromEntries(['content-type', 'idempotency-key', 'authorization',

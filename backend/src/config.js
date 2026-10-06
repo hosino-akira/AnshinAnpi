@@ -27,6 +27,7 @@ export function readMailConfig(env = process.env, secrets = {}) {
     smtpPassword: secrets.SMTP_PASSWORD ?? env.SMTP_PASSWORD,
     smtpFrom: address('SMTP_FROM_EMAIL'), smtpReplyTo: address('SMTP_REPLY_TO_EMAIL'),
     contactAddress: env.SERVICE_CONTACT?.trim() || '施設スタッフへお問い合わせください。',
+    facilityName: env.FACILITY_NAME?.trim() || 'ご利用施設',
   };
 }
 

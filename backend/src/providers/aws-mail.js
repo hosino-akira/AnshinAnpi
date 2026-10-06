@@ -4,6 +4,7 @@ import {
 } from "@aws-sdk/client-sesv2";
 
 import { MailFailure } from '../mail-failure.js';
+import { mailMessage } from '../mail-message.js';
 export { MailFailure } from '../mail-failure.js';
 
 export class AwsMailProvider {
@@ -21,26 +22,9 @@ export class AwsMailProvider {
       config.awsRegion && config.sesFrom,
     );
   }
-  async send({
-    email,
-    displayName,
-    occurredAt,
-    timezone,
-    type,
-    deliveryId,
-  }) {
-    const date = new Intl.DateTimeFormat("ja-JP", {
-      timeZone: timezone,
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(occurredAt));
-    const registration = type === "registration";
-    const subject = registration
-      ? "【安心安否確認】連絡先登録のお知らせ"
-      : `【安心安否確認】${displayName}さんからのお知らせ`;
-    const text = registration
-      ? `${displayName}さんの連絡先として、${date}に登録されました。\n安心安否確認は、ご本人の操作により安否確認メールを送るサービスです。\n誤登録の場合：${this.config.contactAddress}\n本サービスは緊急通報ではありません。`
-      : `${displayName}さんが ${date} に安否確認操作を行いました。\n本人の操作により送信された自動メールです。\n本サービスは緊急通報ではありません。\nお問い合わせ：${this.config.contactAddress}`;
+  async send(message) {
+    const { email, deliveryId } = message;
+    const { subject, text } = mailMessage(this.config, message);
     try {
       const result = await this.client.send(
         new SendEmailCommand({

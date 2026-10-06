@@ -4,9 +4,7 @@
  * 安心安否確認システム：管理者用UI
  *
  * PCブラウザから登録者・最大2件のメール送信先・個人情報取扱文面を
- * 管理するための画面デザインです。現在は画面確認用のサンプルデータを
- * Reactのメモリ上で編集します。本番運用では認証、権限制御、監査ログ、
- * API、データベースへ置き換えてください。
+ * 管理します。単一管理者のメールアドレスとパスワードによる認証と管理APIを使用します。
  */
 
 import {
@@ -47,7 +45,7 @@ import {
   useEffect,
   useMemo,
   useState,
-  type CSSProperties,
+  useRef,
   type FormEvent,
 } from "react";
 import {
@@ -88,6 +86,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { adminApi, type AdminSession, type AdminSettings, type Dashboard, type Policy } from "@/lib/admin-api";
 import "./admin.css";
 
 type AdminView =
@@ -96,8 +95,9 @@ type AdminView =
   | "recipients"
   | "mailTemplate"
   | "privacy"
-  | "admin";
-type UserStatus = "active" | "suspended";
+  | "admin"
+  | "audit";
+type UserStatus = "active" | "suspended" | "pending_registration";
 type FaceStatus = "registered" | "renewal";
 type Recipient = {
   id: string;
@@ -107,14 +107,13 @@ type Recipient = {
 type AdminAccount = {
   name: string;
   email: string;
-  password: string;
   lastLoginAt: string;
   lastLoginIp: string;
 };
 type RegisteredUser = {
   id: string;
   name: string;
-  faceIndex: number;
+  revision: string;
   status: UserStatus;
   faceStatus: FaceStatus;
   registeredAt: string;
@@ -137,213 +136,19 @@ type FlashMessage = {
   text: string;
 } | null;
 
-const INITIAL_ADMIN: AdminAccount = {
-  name: "安心施設 管理者",
-  email: "admin@anshin-anpi.jp",
-  password: "Anshin2026!",
-  lastLoginAt: "2026/09/06 17:42",
-  // RFC 5737で例示用に予約されたIPアドレスを使用しています。
-  lastLoginIp: "203.0.113.24",
-};
-
-const INITIAL_USERS: RegisteredUser[] = [
-  {
-    id: "USR-00128",
-    name: "山田 太郎",
-    faceIndex: 0,
-    status: "active",
-    faceStatus: "registered",
-    registeredAt: "2026/08/18",
-    updatedAt: "2026/09/06 10:24",
-    lastCheckAt: "2026/09/07 08:42",
-    consentVersion: "v1.2",
-    recipients: [
-      {
-        id: "REC-001",
-        name: "山田 花子",
-        email: "hanako@example.jp",
-      },
-      {
-        id: "REC-002",
-        name: "山田 一郎",
-        email: "ichiro@example.jp",
-      },
-    ],
-  },
-  {
-    id: "USR-00127",
-    name: "佐藤 和子",
-    faceIndex: 1,
-    status: "active",
-    faceStatus: "registered",
-    registeredAt: "2026/08/16",
-    updatedAt: "2026/09/05 15:10",
-    lastCheckAt: "2026/09/06 17:55",
-    consentVersion: "v1.2",
-    recipients: [
-      {
-        id: "REC-003",
-        name: "佐藤 美咲",
-        email: "misaki@example.jp",
-      },
-    ],
-  },
-  {
-    id: "USR-00126",
-    name: "鈴木 正夫",
-    faceIndex: 2,
-    status: "suspended",
-    faceStatus: "renewal",
-    registeredAt: "2026/08/12",
-    updatedAt: "2026/09/04 09:32",
-    lastCheckAt: "2026/08/29 11:03",
-    consentVersion: "v1.1",
-    recipients: [
-      {
-        id: "REC-004",
-        name: "鈴木 洋子",
-        email: "yoko@example.jp",
-      },
-      {
-        id: "REC-005",
-        name: "鈴木 健",
-        email: "ken@example.jp",
-      },
-    ],
-  },
-  {
-    id: "USR-00125",
-    name: "高橋 久美子",
-    faceIndex: 3,
-    status: "active",
-    faceStatus: "registered",
-    registeredAt: "2026/08/09",
-    updatedAt: "2026/09/03 13:18",
-    lastCheckAt: "2026/09/05 09:20",
-    consentVersion: "v1.2",
-    recipients: [
-      {
-        id: "REC-006",
-        name: "高橋 健太",
-        email: "kenta@example.jp",
-      },
-    ],
-  },
-  {
-    id: "USR-00124",
-    name: "田中 春江",
-    faceIndex: 4,
-    status: "active",
-    faceStatus: "registered",
-    registeredAt: "2026/08/03",
-    updatedAt: "2026/09/02 16:40",
-    lastCheckAt: "2026/09/07 07:58",
-    consentVersion: "v1.2",
-    recipients: [
-      {
-        id: "REC-007",
-        name: "田中 一美",
-        email: "kazumi@example.jp",
-      },
-      {
-        id: "REC-008",
-        name: "田中 誠",
-        email: "makoto@example.jp",
-      },
-    ],
-  },
-];
-
-const INITIAL_PRIVACY = `安心安否確認システムにおける個人情報の取扱い
-
-1. 取得する情報
-本システムでは、利用者の氏名、顔認証に必要な特徴情報、メール送信先の氏名およびメールアドレス、安否確認の送信結果を取得します。
-
-2. 利用目的
-取得した情報は、利用者本人の確認、登録された送信先への安否確認メール送信、本システムの安全な運用およびお問い合わせ対応のために利用します。
-
-3. 第三者への提供
-法令に基づく場合を除き、本人の同意なく取得した情報を第三者へ提供しません。
-
-4. 安全管理
-取得した情報へのアクセスを管理し、暗号化その他の適切な安全管理措置を講じます。
-
-5. 保存期間と削除
-個人情報は利用目的に必要な期間に限り保存します。利用者から削除の申出があった場合は、法令上必要な期間を除き速やかに削除します。
-
-6. お問い合わせ
-個人情報の確認、変更、削除に関するお問い合わせは、施設の個人情報管理責任者までお申し出ください。`;
-
-// 家族へ送る安否確認メールの初期文面です。二重波括弧は送信時に実データへ置換します。
-const INITIAL_MAIL_SUBJECT =
-  "【安心安否確認】{{登録者名}}さんから安否確認のお知らせ";
-const INITIAL_MAIL_BODY = `{{送信先名}} 様
-
-{{登録者名}}さんが、{{確認日時}}に安心安否確認システムから安否確認を送信しました。
-
-現在、{{施設名}}の端末でご本人の確認が完了しています。
-
-※本メールは送信専用です。
-※このサービスは緊急通報ではありません。緊急時は119番・110番をご利用ください。`;
-
-const MAIL_TEMPLATE_VARIABLES = [
-  "{{送信先名}}",
-  "{{登録者名}}",
-  "{{確認日時}}",
-  "{{施設名}}",
-] as const;
-
-// 編集画面では架空データを差し込み、実際の配信イメージをその場で確認できます。
-const renderMailSample = (text: string) =>
-  text
-    .replaceAll("{{送信先名}}", "山田 花子")
-    .replaceAll("{{登録者名}}", "山田 太郎")
-    .replaceAll("{{確認日時}}", "2026/09/07 10:30")
-    .replaceAll("{{施設名}}", "安心施設");
-
-const INITIAL_ACTIVITIES = [
-  "山田 太郎さんの送信先を更新しました",
-  "個人情報取扱文面 v1.2を公開しました",
-  "鈴木 正夫さんを利用停止に変更しました",
-];
-
-const MAIL_ERRORS = [
-  {
-    id: "ERR-20260907-002",
-    userName: "佐藤 和子",
-    userId: "USR-00127",
-    recipientName: "佐藤 美咲",
-    email: "misaki@example.jp",
-    occurredAt: "2026/09/07 09:14",
-    code: "SMTP 550",
-    reason: "宛先メールアドレスが存在しません",
-  },
-  {
-    id: "ERR-20260907-001",
-    userName: "高橋 久美子",
-    userId: "USR-00125",
-    recipientName: "高橋 健太",
-    email: "kenta@example.jp",
-    occurredAt: "2026/09/07 08:31",
-    code: "TIMEOUT",
-    reason:
-      "送信先メールサーバーへの接続がタイムアウトしました",
-  },
-] as const;
-
-// 編集中のオブジェクトが初期サンプルを書き換えないよう、毎回複製して利用します。
-const createSampleUsers = (): RegisteredUser[] =>
-  INITIAL_USERS.map((user) => ({
-    ...user,
-    recipients: user.recipients.map((recipient) => ({
-      ...recipient,
-    })),
-  }));
+const INITIAL_ADMIN: AdminAccount = { name: "", email: "", lastLoginAt: "—", lastLoginIp: "—" };
+const INITIAL_PRIVACY = "", INITIAL_MAIL_SUBJECT = "", INITIAL_MAIL_BODY = "";
+const MAIL_TEMPLATE_VARIABLES = ['{{送信先名}}', '{{登録者名}}', '{{確認日時}}', '{{施設名}}'] as const;
+const renderMailSample = (text: string) => text.replace(/\{\{(送信先名|登録者名|確認日時|施設名)\}\}/g,
+  (_, key: string) => ({送信先名: '山田 花子', 登録者名: '山田 太郎', 確認日時: '2026/10/06 10:30', 施設名: '安心施設'} as Record<string, string>)[key]);
+const formatDate = (value: string | null | undefined) => value ? new Intl.DateTimeFormat("ja-JP", {timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false}).format(new Date(value)) : "—";
+const errorText = (error: unknown) => error instanceof Error ? error.message : "処理を完了できません。";
 
 const VIEW_COPY: Record<
   AdminView,
   { title: string; description: string }
 > = {
+  audit: {title: "操作記録", description: "管理者操作と送信・照合の記録を確認します。"},
   dashboard: {
     title: "管理状況",
     description: "登録状況と直近の変更を確認できます。",
@@ -380,7 +185,7 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function StatusBadge({ status }: { status: UserStatus }) {
   return (
     <span className={`admin-status ${status}`}>
-      {status === "active" ? "利用中" : "利用停止"}
+      {status === "active" ? "利用中" : status === "pending_registration" ? "登録確認中" : "利用停止"}
     </span>
   );
 }
@@ -398,33 +203,8 @@ function FaceBadge({ status }: { status: FaceStatus }) {
   );
 }
 
-function FacePhoto({
-  user,
-  size = "table",
-}: {
-  user: RegisteredUser;
-  size?: "table" | "large";
-}) {
-  return (
-    <span
-      className={`face-photo ${size}`}
-      style={
-        { "--face-index": user.faceIndex } as CSSProperties
-      }
-      role="img"
-      aria-label={`${user.name}さんの登録顔写真`}
-    />
-  );
-}
-
-function formatNow() {
-  return new Intl.DateTimeFormat("ja-JP", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date());
+function FacePhoto({user}: {user: RegisteredUser; size?: "table" | "large"}) {
+  return <span className="face-placeholder" aria-label={`${user.name}さん`}><UserRound aria-hidden="true" /></span>;
 }
 
 export default function AdminPage() {
@@ -450,7 +230,7 @@ export default function AdminPage() {
   const [view, setView] = useState<AdminView>("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [users, setUsers] = useState<RegisteredUser[]>(
-    createSampleUsers,
+    [],
   );
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
@@ -474,30 +254,103 @@ export default function AdminPage() {
     INITIAL_MAIL_BODY,
   );
   const [mailSavedAt, setMailSavedAt] = useState(
-    "2026/09/07 09:45",
+    "—",
   );
   const [privacyText, setPrivacyText] =
     useState(INITIAL_PRIVACY);
   const [savedPrivacyText, setSavedPrivacyText] =
     useState(INITIAL_PRIVACY);
   const [privacyVersion, setPrivacyVersion] =
-    useState("v1.3");
+    useState("");
   const [privacyDate, setPrivacyDate] =
-    useState("2026-09-07");
+    useState(new Date().toLocaleDateString("en-CA"));
   const [privacyMode, setPrivacyMode] = useState<
     "edit" | "preview"
   >("edit");
   const [privacySavedAt, setPrivacySavedAt] = useState(
-    "2026/09/06 16:20",
+    "—",
   );
   const [activities, setActivities] = useState(
-    INITIAL_ACTIVITIES,
+    [] as string[],
   );
   const [flash, setFlash] = useState<FlashMessage>(null);
   const [isInteractive, setIsInteractive] = useState(false);
 
+  const [busy, setBusy] = useState(false);
+  const [identityConfirmed, setIdentityConfirmed] = useState(false);
+  const [ownerPresent, setOwnerPresent] = useState(false);
+  const [faceConsent, setFaceConsent] = useState(false);
+  const [faceImage, setFaceImage] = useState("");
+  const [policyType, setPolicyType] = useState<"registration" | "safety">("registration");
+  const [policyTitle, setPolicyTitle] = useState("");
+  const [reconsent, setReconsent] = useState(false);
+  const [settings, setSettings] = useState<AdminSettings | null>(null);
+  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [mailRevision, setMailRevision] = useState("");
+  const [auditLogs, setAuditLogs] = useState<{log_id: string; action: string; target_id: string | null; result: string; occurred_at: string; reason: string | null}[]>([]);
+  const [auditBefore, setAuditBefore] = useState<string | null>(null);
+  const MAIL_ERRORS = (dashboard?.errors ?? []).map(error => ({...error, occurredAt: formatDate(error.occurredAt), reason: error.status === "unknown" ? "受理結果が不明です。重複送信を避け、送信記録を確認してください。" : error.status === "bounced" ? "配信できませんでした。送信先を確認してください。" : "メール送信に失敗しました。"}));
+  const setProfile = (profile: AdminSession["admin"]) => {
+    setAdminAccount({name: profile.name, email: profile.email, lastLoginAt: formatDate(profile.last_login_at), lastLoginIp: profile.last_login_ip ?? "—"});
+    setAdminDraft({name: profile.name, email: profile.email});
+  };
+  const applyPolicy = (policy: Policy) => {
+    setPrivacyText(policy.body); setSavedPrivacyText(policy.body); setPrivacyVersion(policy.policy_version);
+    setPrivacyDate(policy.effective_date === "1970-01-01" ? new Date().toLocaleDateString("en-CA") : policy.effective_date); setPolicyTitle(policy.title); setReconsent(policy.requires_reconsent);
+  };
+  const loadData = async (type: "registration" | "safety" = policyType) => {
+    const [list, summary, configuration] = await Promise.all([
+      adminApi<{users: RegisteredUser[]; total: number}>("/users?limit=200"),
+      adminApi<Dashboard>("/dashboard"), adminApi<AdminSettings>("/settings"),
+    ]);
+    setUsers(list.users); setDashboard(summary); setSettings(configuration);
+    setMailSubject(configuration.mail.subject); setSavedMailSubject(configuration.mail.subject);
+    setMailBody(configuration.mail.body); setSavedMailBody(configuration.mail.body);
+    setMailRevision(configuration.mail.revision); setMailSavedAt(formatDate(configuration.mail.updated_at));
+    const policy = configuration.policies.find(x => x.consent_type === type);
+    if (policy) applyPolicy(policy);
+    setPrivacySavedAt("データベースから取得");
+    setActivities(summary.activities.map(x => `${formatDate(x.occurred_at)} ${x.action}`));
+  };
+  const photoEpoch = useRef(0);
+  const closeEditor = () => { photoEpoch.current++; setEditingUser(null); setFaceImage(""); setOwnerPresent(false); setFaceConsent(false); };
+  const clearSession = () => {
+    setIsAuthenticated(false); setUsers([]); closeEditor(); setDeleteTarget(null);
+    setDashboard(null); setSettings(null); setAuditLogs([]); setActivities([]); setFaceImage("");
+    setMailBody(""); setSavedMailBody(""); setPrivacyText(""); setSavedPrivacyText("");
+    setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
+  };
+  useEffect(() => {
+    let cancelled = false;
+    const expired = () => { clearSession(); setLoginError("有効期限が切れました。再ログインしてください。"); };
+    window.addEventListener("admin-session-expired", expired);
+    void adminApi<AdminSession>("/session").then(async session => {
+      if (cancelled) return;
+      setProfile(session.admin); await loadData("registration"); setIsAuthenticated(true);
+    }).catch(error => { if (!cancelled && error.status !== 401) setLoginError(errorText(error)); });
+    return () => { cancelled = true; window.removeEventListener("admin-session-expired", expired); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const loadAudit = async (append = false) => {
+    try {
+      const result = await adminApi<{logs: typeof auditLogs; next_before: string | null}>(`/audit-logs?limit=50&reason=audit${append && auditBefore ? `&before=${auditBefore}` : ""}`);
+      setAuditLogs(current => append ? [...current, ...result.logs] : result.logs); setAuditBefore(result.next_before);
+    } catch (error) { setFlash({tone: "error", text: errorText(error)}); }
+  };
+  const searchUsers = async () => {
+    try {
+      if (!query.trim()) { await loadData(); return; }
+      const result = await adminApi<{users: RegisteredUser[]}>("/users/search", "POST", {name: query.trim(), reason: "support"}); setUsers(result.users);
+    } catch (error) { setFlash({tone: "error", text: errorText(error)}); }
+  };
+  const loadMoreUsers = async () => {
+    try {
+      const result = await adminApi<{users: RegisteredUser[]}>(`/users?limit=200&offset=${users.length}`); setUsers(current => [...current, ...result.users]);
+    } catch (error) { setFlash({tone: "error", text: errorText(error)}); }
+  };
+
   // クライアント側の操作機能が読み込まれたことを画面上でも確認できるようにします。
-  useEffect(() => setIsInteractive(true), []);
+  useEffect(() => { queueMicrotask(() => setIsInteractive(true)); }, []);
 
   // 操作結果メッセージは一定時間後に自動で閉じます。
   useEffect(() => {
@@ -509,13 +362,8 @@ export default function AdminPage() {
     return () => window.clearTimeout(timer);
   }, [flash]);
 
-  const activeCount = users.filter(
-    (user) => user.status === "active",
-  ).length;
-  const recipientCount = users.reduce(
-    (sum, user) => sum + user.recipients.length,
-    0,
-  );
+  const activeCount = dashboard?.counts.active ?? 0;
+  const recipientCount = dashboard?.counts.recipients ?? 0;
   const isMailTemplateDirty =
     mailSubject !== savedMailSubject ||
     mailBody !== savedMailBody;
@@ -525,68 +373,28 @@ export default function AdminPage() {
       const matchesStatus =
         statusFilter === "all" ||
         user.status === statusFilter;
-      const matchesQuery =
-        !keyword ||
-        user.name.toLowerCase().includes(keyword) ||
-        user.id.toLowerCase().includes(keyword) ||
-        user.recipients.some(
-          (recipient) =>
-            recipient.name
-              .toLowerCase()
-              .includes(keyword) ||
-            recipient.email.toLowerCase().includes(keyword),
-        );
+      const matchesQuery = !keyword || user.name.toLowerCase() === keyword;
       return matchesStatus && matchesQuery;
     });
   }, [query, statusFilter, users]);
 
-  const handleLogin = (
-    event: FormEvent<HTMLFormElement>,
-  ) => {
-    event.preventDefault();
-    setLoginError("");
-    if (
-      loginEmail.trim().toLowerCase() !==
-        adminAccount.email.toLowerCase() ||
-      loginPassword !== adminAccount.password
-    ) {
-      setLoginError(
-        "メールアドレスまたはパスワードが正しくありません。",
-      );
-      return;
-    }
-    const signedInAccount = {
-      ...adminAccount,
-      lastLoginAt: formatNow(),
-    };
-    setAdminAccount(signedInAccount);
-    setAdminDraft({
-      name: signedInAccount.name,
-      email: signedInAccount.email,
-    });
-    setLoginPassword("");
-    setIsAuthenticated(true);
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); if (busy) return; setBusy(true); setLoginError("");
+    try {
+      const session = await adminApi<AdminSession>("/login", "POST", {email: loginEmail.trim().toLowerCase(), password: loginPassword});
+      setProfile(session.admin); setLoginPassword(""); await loadData(); setIsAuthenticated(true);
+    } catch (error) { setLoginError(errorText(error)); } finally { setBusy(false); }
   };
-
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    setView("dashboard");
-    setMobileNavOpen(false);
-    setLoginEmail("");
-    setLoginPassword("");
-    setShowLoginPassword(false);
-    setFlash(null);
+  const handleLogout = async () => {
+    try { await adminApi("/logout", "POST"); clearSession(); setView("dashboard"); setFlash(null); }
+    catch (error) { showFlash("error", errorText(error)); }
   };
 
   const selectView = (nextView: AdminView) => {
     setView(nextView);
+    if (nextView === "audit") void loadAudit();
     setMobileNavOpen(false);
   };
-
-  const addActivity = (message: string) =>
-    setActivities((current) =>
-      [message, ...current].slice(0, 5),
-    );
 
   const showFlash = (
     tone: NonNullable<FlashMessage>["tone"],
@@ -595,91 +403,21 @@ export default function AdminPage() {
     setFlash({ tone, text });
   };
 
-  const saveAdminAccount = (
-    event: FormEvent<HTMLFormElement>,
-  ) => {
-    event.preventDefault();
-    const name = adminDraft.name.trim();
-    const email = adminDraft.email.trim();
-    const passwordChangeRequested = Boolean(
-      currentPassword || newPassword || confirmPassword,
-    );
-
-    if (!name || !emailPattern.test(email)) {
-      setAdminFormError(
-        "管理者名と正しいメールアドレスを入力してください。",
-      );
-      return;
-    }
-    if (
-      passwordChangeRequested &&
-      currentPassword !== adminAccount.password
-    ) {
-      setAdminFormError(
-        "現在のパスワードが正しくありません。",
-      );
-      return;
-    }
-    if (passwordChangeRequested && newPassword.length < 8) {
-      setAdminFormError(
-        "新しいパスワードは8文字以上で入力してください。",
-      );
-      return;
-    }
-    if (
-      passwordChangeRequested &&
-      newPassword !== confirmPassword
-    ) {
-      setAdminFormError(
-        "新しいパスワードと確認用パスワードが一致しません。",
-      );
-      return;
-    }
-
-    setAdminAccount((current) => ({
-      ...current,
-      name,
-      email,
-      password: passwordChangeRequested
-        ? newPassword
-        : current.password,
-    }));
-    setAdminDraft({ name, email });
-    setCurrentPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
-    setAdminFormError("");
-    addActivity(`${name}さんの管理者情報を更新しました`);
-    showFlash("success", "管理者情報を保存しました");
+  const saveAdminAccount = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); if (busy) return;
+    if (newPassword && (newPassword.length < 12 || newPassword !== confirmPassword)) { setAdminFormError("新しいパスワードは12文字以上で、確認欄と一致させてください。"); return; }
+    setBusy(true); setAdminFormError("");
+    try {
+      await adminApi("/profile", "PUT", {name: adminDraft.name.trim(), email: adminDraft.email.trim(), current_password: currentPassword, ...(newPassword ? {new_password: newPassword} : {})});
+      clearSession(); setLoginError("管理者情報を保存しました。メールアドレスとパスワードで再ログインしてください。");
+    } catch (error) { setAdminFormError(errorText(error)); } finally { setBusy(false); }
   };
-
-  // 削除・変更後でも、確認用の5件をワンクリックで初期状態へ戻せます。
-  const resetSampleData = () => {
-    setUsers(createSampleUsers());
-    setQuery("");
-    setStatusFilter("all");
-    setEditingUser(null);
-    setDeleteTarget(null);
-    setMailSubject(INITIAL_MAIL_SUBJECT);
-    setSavedMailSubject(INITIAL_MAIL_SUBJECT);
-    setMailBody(INITIAL_MAIL_BODY);
-    setSavedMailBody(INITIAL_MAIL_BODY);
-    setMailSavedAt("2026/09/07 09:45");
-    setPrivacyText(INITIAL_PRIVACY);
-    setSavedPrivacyText(INITIAL_PRIVACY);
-    setPrivacyVersion("v1.3");
-    setPrivacyDate("2026-09-07");
-    setPrivacyMode("edit");
-    setPrivacySavedAt("2026/09/06 16:20");
-    setActivities(INITIAL_ACTIVITIES);
-    showFlash(
-      "success",
-      "サンプルデータ5件を初期状態に戻しました",
-    );
+  const refreshData = async () => {
+    try { await loadData(); showFlash("success", "最新のデータを読み込みました"); } catch (error) { showFlash("error", errorText(error)); }
   };
 
   const openUserEditor = (user: RegisteredUser) => {
-    setFormError("");
+    setFormError(""); setIdentityConfirmed(false); photoEpoch.current++; setFaceImage(""); setOwnerPresent(false); setFaceConsent(false);
     setEditingUser({
       ...user,
       recipients: user.recipients.map((recipient) => ({
@@ -722,7 +460,8 @@ export default function AdminPage() {
     });
   };
 
-  const saveUser = () => {
+  const saveUser = async () => {
+    if (busy) return;
     if (!editingUser) return;
     const trimmedName = editingUser.name.trim();
     const recipients = editingUser.recipients.map(
@@ -766,127 +505,60 @@ export default function AdminPage() {
       );
       return;
     }
-    const updated = {
-      ...editingUser,
-      name: trimmedName,
-      recipients,
-      updatedAt: formatNow(),
-    };
-    setUsers((current) =>
-      current.map((user) =>
-        user.id === updated.id ? updated : user,
-      ),
-    );
-    addActivity(
-      `${updated.name}さんの登録情報を更新しました`,
-    );
-    setEditingUser(null);
-    showFlash("success", "登録者情報を保存しました");
-  };
-
-  const confirmDelete = () => {
-    if (!deleteTarget) return;
-    if (deleteTarget.kind === "user") {
-      setUsers((current) =>
-        current.filter(
-          (user) => user.id !== deleteTarget.userId,
-        ),
-      );
-      addActivity(
-        `${deleteTarget.label}さんの登録情報を削除しました`,
-      );
-      setEditingUser(null);
-      showFlash("success", "登録者情報を削除しました");
-    } else {
-      setUsers((current) =>
-        current.map((user) => {
-          if (user.id !== deleteTarget.userId) return user;
-          const recipients = user.recipients.filter(
-            (recipient) =>
-              recipient.id !== deleteTarget.recipientId,
-          );
-          // 送信先が0件になった登録者は、誤送信を防ぐため利用停止へ切り替えます。
-          return {
-            ...user,
-            status:
-              recipients.length === 0
-                ? "suspended"
-                : user.status,
-            updatedAt: formatNow(),
-            recipients,
-          };
-        }),
-      );
-      setEditingUser((current) => {
-        if (current?.id !== deleteTarget.userId)
-          return current;
-        const recipients = current.recipients.filter(
-          (recipient) =>
-            recipient.id !== deleteTarget.recipientId,
-        );
-        return {
-          ...current,
-          status:
-            recipients.length === 0
-              ? "suspended"
-              : current.status,
-          recipients,
-        };
+    if (!identityConfirmed) { setFormError("本人確認を実施したことを確認してください。"); return; }
+    setBusy(true);
+    try {
+      const resetFace = editingUser.faceStatus === "renewal" && users.find(x => x.id === editingUser.id)?.faceStatus === "registered";
+      const result = await adminApi<{user: RegisteredUser}>(`/users/${editingUser.id}`, "PUT", {
+        name: trimmedName, status: editingUser.status, recipients: recipients.map(x => ({name: x.name, email: x.email, ...(/^[0-9a-f-]{36}$/i.test(x.id) ? {id: x.id} : {})})),
+        expected_revision: editingUser.revision, identity_confirmed: true, reset_face: resetFace, reason: resetFace || editingUser.status === "suspended" ? "suspension" : "correction",
       });
-      addActivity(
-        `${deleteTarget.label}さんをメール送信先から削除しました`,
-      );
-      showFlash("success", "メール送信先を削除しました");
-    }
-    setDeleteTarget(null);
+      await loadData(); setEditingUser(resetFace ? result.user : null); setIdentityConfirmed(false);
+      showFlash("success", resetFace ? "旧顔データを無効化しました。本人立会いで顔を再登録してください。" : "登録者情報を保存しました");
+    } catch (error) { setFormError(errorText(error)); } finally { setBusy(false); }
   };
-
-  const savePrivacy = () => {
-    if (!privacyText.trim()) {
-      showFlash(
-        "error",
-        "個人情報取扱文面を入力してください",
-      );
-      return;
-    }
-    if (!privacyVersion.trim() || !privacyDate) {
-      showFlash(
-        "error",
-        "版番号と適用開始日を入力してください",
-      );
-      return;
-    }
-    setSavedPrivacyText(privacyText);
-    setPrivacySavedAt(formatNow());
-    addActivity(
-      `個人情報取扱文面 ${privacyVersion}を保存しました`,
-    );
-    showFlash("success", "個人情報取扱文面を保存しました");
+  const confirmDelete = async () => {
+    if (!deleteTarget || busy) return;
+    const user = users.find(x => x.id === deleteTarget.userId); if (!user) return;
+    setBusy(true);
+    try {
+      await adminApi(`/users/${user.id}${deleteTarget.kind === "recipient" ? `/recipients/${deleteTarget.recipientId}` : ""}`, "DELETE", {expected_revision: user.revision, reason: "deletion"});
+      setDeleteTarget(null); closeEditor(); await loadData(); showFlash("success", "削除を記録し、対象データを消去しました");
+    } catch (error) { showFlash("error", errorText(error)); } finally { setBusy(false); }
   };
-
-  const saveMailTemplate = () => {
-    const subject = mailSubject.trim();
-    const body = mailBody.trim();
-    if (!subject) {
-      showFlash(
-        "error",
-        "メールタイトルを入力してください",
-      );
-      return;
-    }
-    if (!body) {
-      showFlash("error", "メール本文を入力してください");
-      return;
-    }
-    setMailSubject(subject);
-    setSavedMailSubject(subject);
-    setMailBody(body);
-    setSavedMailBody(body);
-    setMailSavedAt(formatNow());
-    addActivity(
-      "家族向け送信メールのタイトルと本文を保存しました",
-    );
-    showFlash("success", "送信メールの内容を保存しました");
+  const savePrivacy = async () => {
+    if (busy) return; setBusy(true);
+    try {
+      await adminApi(`/policies/${policyType}`, "POST", {policy_version: privacyVersion.trim(), title: policyTitle.trim(), body: privacyText.trim(), effective_date: privacyDate, requires_reconsent: reconsent});
+      await loadData(); showFlash("success", "新しい文面を保存しました。指定日から適用されます。");
+    } catch (error) { showFlash("error", errorText(error)); } finally { setBusy(false); }
+  };
+  const saveMailTemplate = async () => {
+    if (busy) return; setBusy(true);
+    try {
+      await adminApi("/mail-template", "PUT", {subject: mailSubject.trim(), body: mailBody.trim(), expected_revision: mailRevision});
+      await loadData(); showFlash("success", "送信メールの内容を保存しました");
+    } catch (error) { showFlash("error", errorText(error)); } finally { setBusy(false); }
+  };
+  const reenrollFace = async () => {
+    if (!editingUser || !faceImage || !ownerPresent || !faceConsent || busy) return;
+    const policy = settings?.policies.find(x => x.consent_type === "registration"); if (!policy) return;
+    setBusy(true);
+    try {
+      await adminApi(`/users/${editingUser.id}/face`, "POST", {image_base64: faceImage, expected_revision: editingUser.revision, owner_present: true, consent_granted: true, policy_version: policy.policy_version});
+      setFaceImage(""); closeEditor(); await loadData(); showFlash("success", "顔を再登録し、利用を再開しました");
+    } catch (error) { setFormError(errorText(error)); } finally { setBusy(false); }
+  };
+  const renewConsent = async () => {
+    const policy = settings?.policies.find(x => x.consent_type === 'registration');
+    if (!editingUser || !policy || !ownerPresent || !faceConsent || busy) return;
+    setBusy(true);
+    try {
+      const result = await adminApi<{user: RegisteredUser}>(`/users/${editingUser.id}/consent`, 'POST', {
+        expected_revision: editingUser.revision, owner_present: true, consent_granted: true, policy_version: policy.policy_version,
+      });
+      await loadData(); setEditingUser(result.user); setOwnerPresent(false); setFaceConsent(false); showFlash('success', '新しい文面への同意を記録しました');
+    } catch (error) { setFormError(errorText(error)); } finally { setBusy(false); }
   };
 
   const restoreMailTemplate = () => {
@@ -921,6 +593,7 @@ export default function AdminPage() {
       label: "個人情報取扱文面",
       icon: BookOpenText,
     },
+    { id: "audit" as const, label: "操作記録", icon: Activity },
     {
       id: "admin" as const,
       label: "管理者情報",
@@ -1053,33 +726,13 @@ export default function AdminPage() {
                 {loginError}
               </div>
             )}
-            <Button type="submit" className="login-submit">
+            <Button type="submit" className="login-submit" disabled={busy}>
               <LogIn aria-hidden="true" />
               ログイン
             </Button>
-            <div className="login-demo">
-              <div>
-                <strong>デモ用ログイン情報</strong>
-                <span>
-                  {adminAccount.email}
-                  <br />
-                  {adminAccount.password}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setLoginEmail(adminAccount.email);
-                  setLoginPassword(adminAccount.password);
-                  setLoginError("");
-                }}
-              >
-                入力欄にセット
-              </button>
-            </div>
             <p className="login-security-note">
               <ShieldCheck aria-hidden="true" />
-              この画面はデザイン確認用です。本番ではサーバー認証とアクセス制御へ接続してください。
+              メールアドレスとパスワードでログインします。
             </p>
           </form>
         </section>
@@ -1136,9 +789,9 @@ export default function AdminPage() {
               <TableCell>
                 <div className="date-cell">
                   {!compact && (
-                    <small>登録 {user.registeredAt}</small>
+                    <small>登録 {formatDate(user.registeredAt)}</small>
                   )}
-                  <span>{user.lastCheckAt}</span>
+                  <span>{formatDate(user.lastCheckAt)}</span>
                 </div>
               </TableCell>
               <TableCell className="action-column">
@@ -1254,8 +907,8 @@ export default function AdminPage() {
           <div className="environment-note">
             <Database aria-hidden="true" />
             <div>
-              <strong>デザイン確認用</strong>
-              <span>サンプルデータを表示中</span>
+              <strong>管理者接続</strong>
+              <span>共有データベースを表示中</span>
             </div>
           </div>
           <button type="button" onClick={handleLogout}>
@@ -1298,7 +951,7 @@ export default function AdminPage() {
                 selectView("dashboard");
                 showFlash(
                   "info",
-                  `最近の変更を${activities.length}件、メール送信エラーを${MAIL_ERRORS.length}件表示しています`,
+                  `最近の変更を${activities.length}件、メール送信エラーを${dashboard?.counts.errors ?? 0}件表示しています`,
                 );
               }}
             >
@@ -1348,7 +1001,7 @@ export default function AdminPage() {
                   <div>
                     <small>登録者数</small>
                     <strong>
-                      {users.length}
+                      {dashboard?.counts.users ?? 0}
                       <em>名</em>
                     </strong>
                     <p>
@@ -1367,7 +1020,7 @@ export default function AdminPage() {
                       <em>件</em>
                     </strong>
                     <p>
-                      最大 {users.length * 2}件まで登録可能
+                      最大 {(dashboard?.counts.users ?? 0) * 2}件まで登録可能
                     </p>
                   </div>
                 </article>
@@ -1378,10 +1031,10 @@ export default function AdminPage() {
                   <div>
                     <small>本日の安否確認</small>
                     <strong>
-                      14<em>件</em>
+                      {dashboard?.counts.today ?? 0}<em>件</em>
                     </strong>
                     <p>
-                      <b>12件</b>送信済み
+                      <b>{dashboard?.counts.accepted ?? 0}件</b>受理済み
                     </p>
                   </div>
                 </article>
@@ -1392,7 +1045,7 @@ export default function AdminPage() {
                   <div>
                     <small>メール送信エラー</small>
                     <strong>
-                      {MAIL_ERRORS.length}
+                      {dashboard?.counts.errors ?? 0}
                       <em>件</em>
                     </strong>
                     <p>詳細確認が必要です</p>
@@ -1417,19 +1070,19 @@ export default function AdminPage() {
                 <CircleAlert aria-hidden="true" />
                 <div>
                   <strong>
-                    サンプルデータ5件で全管理機能を確認できます
+                    登録・送信状況を共有データベースから表示しています
                   </strong>
                   <span>
-                    変更・削除後は右のボタンでいつでも初期状態へ戻せます。
+                    最新の変更を確認するには再読み込みしてください。
                   </span>
                 </div>
                 <Button
                   variant="outline"
                   className="sample-reset-button"
-                  onClick={resetSampleData}
+                  onClick={refreshData}
                 >
                   <RefreshCw aria-hidden="true" />
-                  サンプル5件を再読込
+                  最新データを再読込
                 </Button>
               </section>
 
@@ -1446,7 +1099,7 @@ export default function AdminPage() {
                   </div>
                   <span className="error-count">
                     <CircleX aria-hidden="true" />
-                    未解決 {MAIL_ERRORS.length}件
+                    未解決 {dashboard?.counts.errors ?? 0}件
                   </span>
                 </div>
                 <div className="mail-error-table-wrap">
@@ -1520,7 +1173,7 @@ export default function AdminPage() {
                   <div className="card-head">
                     <div>
                       <p>REGISTERED USERS</p>
-                      <h2>サンプル登録者 5件</h2>
+                      <h2>最近の登録者</h2>
                     </div>
                     <Button
                       variant="outline"
@@ -1547,13 +1200,6 @@ export default function AdminPage() {
                           <span />
                           <div>
                             <strong>{activity}</strong>
-                            <small>
-                              {index === 0
-                                ? "たった今"
-                                : index === 1
-                                  ? "昨日 16:20"
-                                  : "3日前"}
-                            </small>
                           </div>
                         </li>
                       ))}
@@ -1592,6 +1238,7 @@ export default function AdminPage() {
             </>
           )}
 
+          {(view === "users" || view === "recipients") && <div className="admin-data-controls"><Button variant="outline" onClick={() => void searchUsers()}>氏名完全一致で検索</Button><span>{users.length}件を表示 / 全{dashboard?.counts.users ?? 0}件</span>{!query && users.length < (dashboard?.counts.users ?? 0) && <Button variant="outline" onClick={() => void loadMoreUsers()}>次の200件</Button>}</div>}
           {view === "users" && (
             <section className="admin-card management-card">
               <div className="management-toolbar">
@@ -1602,7 +1249,7 @@ export default function AdminPage() {
                     onChange={(event) =>
                       setQuery(event.target.value)
                     }
-                    placeholder="氏名・登録者ID・メールで検索"
+                    placeholder="氏名（完全一致）で検索"
                     aria-label="登録者を検索"
                   />
                   {query && (
@@ -1779,7 +1426,7 @@ export default function AdminPage() {
                   </Button>
                   <Button
                     className="admin-primary"
-                    onClick={saveMailTemplate}
+                    onClick={saveMailTemplate} disabled={busy}
                   >
                     <ShieldCheck aria-hidden="true" />
                     メール文面を保存
@@ -1966,7 +1613,7 @@ export default function AdminPage() {
                   </Button>
                   <Button
                     className="admin-primary"
-                    onClick={savePrivacy}
+                    onClick={savePrivacy} disabled={busy}
                   >
                     <ShieldCheck aria-hidden="true" />
                     文面を保存
@@ -2013,6 +1660,7 @@ export default function AdminPage() {
                       </button>
                     </div>
                   </div>
+                  <div className="policy-controls"><Label>文面の種類</Label><select value={policyType} onChange={event => { const type = event.target.value as "registration" | "safety"; setPolicyType(type); const policy = settings?.policies.find(x => x.consent_type === type); if (policy) applyPolicy(policy); }}><option value="registration">登録・個人情報</option><option value="safety">安否メール送信</option></select><Label htmlFor="policy-title">文面タイトル</Label><Input id="policy-title" value={policyTitle} onChange={event => setPolicyTitle(event.target.value)} /><label className="admin-confirm"><input type="checkbox" checked={reconsent} onChange={event => setReconsent(event.target.checked)} />重要変更として再同意を要求</label></div>
                   {privacyMode === "edit" ? (
                     <>
                       <Textarea
@@ -2076,7 +1724,7 @@ export default function AdminPage() {
                     </div>
                   )}
                 </section>
-                <aside className="privacy-side">
+                <aside className="privacy-side"><section className="admin-card"><h3>保存した文面の履歴</h3><p>変更時は新しい版番号を指定してください。</p><ul>{settings?.history.filter(x => x.consent_type === policyType).map(policy => <li key={policy.policy_version}>{policy.policy_version} / {policy.effective_date === '1970-01-01' ? '初期文面' : policy.effective_date}<Button variant="outline" onClick={() => applyPolicy(policy)}>表示</Button></li>)}</ul></section>
                   <section className="admin-card publish-card">
                     <div className="publish-icon">
                       <FilePenLine aria-hidden="true" />
@@ -2114,6 +1762,7 @@ export default function AdminPage() {
             </section>
           )}
 
+          {view === "audit" && <section className="admin-card"><div className="card-head"><h2>操作記録</h2><Button variant="outline" onClick={() => void loadAudit()}>再読み込み</Button></div><Table><TableHeader><TableRow><TableHead>日時</TableHead><TableHead>操作</TableHead><TableHead>対象</TableHead><TableHead>結果</TableHead><TableHead>用途</TableHead></TableRow></TableHeader><TableBody>{auditLogs.map(log => <TableRow key={log.log_id}><TableCell>{formatDate(log.occurred_at)}</TableCell><TableCell>{log.action}</TableCell><TableCell>{log.target_id ?? "—"}</TableCell><TableCell>{log.result}</TableCell><TableCell>{log.reason ?? "—"}</TableCell></TableRow>)}</TableBody></Table>{auditBefore && <Button onClick={() => void loadAudit(true)}>前の記録を表示</Button>}</section>}
           {view === "admin" && (
             <section className="admin-profile-grid">
               <aside className="admin-card admin-profile-summary">
@@ -2142,7 +1791,7 @@ export default function AdminPage() {
                 <div className="admin-demo-note">
                   <CircleAlert aria-hidden="true" />
                   <span>
-                    IPアドレスはデモ用のサンプル値です。本番ではサーバー側で取得・監査してください。
+                    最終ログインの接続元をサーバー側で記録しています。
                   </span>
                 </div>
               </aside>
@@ -2200,7 +1849,7 @@ export default function AdminPage() {
                     <div>
                       <h3>パスワード変更</h3>
                       <p>
-                        変更しない場合は空欄のまま保存してください。
+                        現在のパスワードは必須です。新しいパスワードは変更時のみ入力してください。
                       </p>
                     </div>
                     <KeyRound aria-hidden="true" />
@@ -2282,6 +1931,7 @@ export default function AdminPage() {
                   </Button>
                   <Button
                     type="submit"
+                    disabled={busy}
                     className="admin-primary"
                   >
                     <ShieldCheck aria-hidden="true" />
@@ -2297,7 +1947,7 @@ export default function AdminPage() {
       <Sheet
         open={Boolean(editingUser)}
         onOpenChange={(open) => {
-          if (!open) setEditingUser(null);
+          if (!open) closeEditor();
         }}
       >
         <SheetContent className="admin-sheet" side="right">
@@ -2349,6 +1999,7 @@ export default function AdminPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
+                        {editingUser.status === "pending_registration" && <SelectItem value="pending_registration">登録確認中</SelectItem>}
                         <SelectItem value="active">
                           利用中
                         </SelectItem>
@@ -2373,7 +2024,7 @@ export default function AdminPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="registered">
+                        <SelectItem value="registered" disabled={users.find(x => x.id === editingUser.id)?.faceStatus !== "registered"}>
                           登録済み
                         </SelectItem>
                         <SelectItem value="renewal">
@@ -2386,7 +2037,7 @@ export default function AdminPage() {
                 <dl className="registration-meta">
                   <div>
                     <dt>登録日</dt>
-                    <dd>{editingUser.registeredAt}</dd>
+                    <dd>{formatDate(editingUser.registeredAt)}</dd>
                   </div>
                   <div>
                     <dt>同意文面</dt>
@@ -2394,10 +2045,25 @@ export default function AdminPage() {
                   </div>
                   <div>
                     <dt>最終安否確認</dt>
-                    <dd>{editingUser.lastCheckAt}</dd>
+                    <dd>{formatDate(editingUser.lastCheckAt)}</dd>
                   </div>
                 </dl>
               </section>
+              <label className="admin-confirm"><input type="checkbox" checked={identityConfirmed} onChange={event => setIdentityConfirmed(event.target.checked)} />本人確認を実施し、変更内容を確認しました。</label>
+              {settings?.policies.some(x => x.consent_type === 'registration' && x.requires_reconsent && x.policy_version !== editingUser.consentVersion) && <section>
+                <h3>最新文面への再同意</h3><p>{settings.policies.find(x => x.consent_type === 'registration')?.body}</p>
+                <label className="admin-confirm"><input type="checkbox" checked={ownerPresent} onChange={event => setOwnerPresent(event.target.checked)} />ご本人が立ち会っています。</label>
+                <label className="admin-confirm"><input type="checkbox" checked={faceConsent} onChange={event => setFaceConsent(event.target.checked)} />ご本人が文面を確認し、同意しました。</label>
+                <Button disabled={busy || !ownerPresent || !faceConsent} onClick={renewConsent}>再同意を記録</Button>
+              </section>}
+              {editingUser.status === "suspended" && users.find(x => x.id === editingUser.id)?.faceStatus === "renewal" && <section className="face-reenroll">
+                <h3>本人立会いで顔を再登録</h3><p>顔写真は一時的に処理し、原画像を保存しません。</p>
+                <Input type="file" accept="image/jpeg,image/png" onChange={event => { const file = event.target.files?.[0]; setFaceImage(""); if (!file) return; if (file.size > 512 * 1024) { setFormError("写真は512 KiB以下にしてください。"); return; } const reader = new FileReader(); const epoch = photoEpoch.current; reader.onload = () => { if (photoEpoch.current === epoch) setFaceImage(String(reader.result).split(",")[1] ?? ""); }; reader.readAsDataURL(file); }} />
+                <label className="admin-confirm"><input type="checkbox" checked={ownerPresent} onChange={event => setOwnerPresent(event.target.checked)} />ご本人が立ち会っています。</label>
+                <details><summary>現在の個人情報取扱文面</summary><p>{settings?.policies.find(x => x.consent_type === "registration")?.body}</p></details>
+                <label className="admin-confirm"><input type="checkbox" checked={faceConsent} onChange={event => setFaceConsent(event.target.checked)} />ご本人が現在の文面に同意しました。</label>
+                <Button disabled={busy || !faceImage || !ownerPresent || !faceConsent} onClick={reenrollFace}>顔を登録して利用再開</Button>
+              </section>}
               <section>
                 <div className="section-title-row">
                   <div>
@@ -2527,13 +2193,13 @@ export default function AdminPage() {
           <SheetFooter>
             <Button
               variant="outline"
-              onClick={() => setEditingUser(null)}
+              onClick={() => closeEditor()}
             >
               キャンセル
             </Button>
             <Button
               className="admin-primary"
-              onClick={saveUser}
+              onClick={saveUser} disabled={busy}
             >
               変更を保存
             </Button>
@@ -2570,7 +2236,7 @@ export default function AdminPage() {
             </AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
-              onClick={confirmDelete}
+              onClick={confirmDelete} disabled={busy}
             >
               削除する
             </AlertDialogAction>

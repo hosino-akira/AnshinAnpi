@@ -2,12 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { fail, unavailable } from './errors.js';
 import { audit } from './audit.js';
 import { transaction } from './db.js';
-import { currentPolicy } from './policies.js';
+import { publishedPolicy } from './admin-settings.js';
 import { maskEmail } from './validation.js';
 
 export class UserService {
   constructor(deps) { Object.assign(this, deps); }
-  async policy(db, type, version) { return currentPolicy(this.policies, type, version); }
+  async policy(db, type, version) { return publishedPolicy(db, this.policies, type, version); }
   async draft(request, id) {
     const draft = await this.store.get('draft', id);
     if (!draft || draft.terminalId !== request.terminal.terminal_id) fail(410, 'TIME-001', '操作時間が過ぎたため終了しました。');
@@ -190,7 +190,13 @@ export class UserService {
   this.face.requireReady();
   const image = Buffer.from(draft.image, 'base64');
   let reference;
-  try { reference = await this.face.index(image, draft.userId); } finally { image.fill(0); }
+  try {
+    // Serialize the search/index/commit sequence across different registration requests.
+    // Only completed registrations prevent a new registration of the same face.
+    await ctx.db.query("SELECT pg_advisory_xact_lock(hashtextextended('anshin:face-registration', 0))");
+    await this.assertNewFace(ctx.db, image);
+    reference = await this.face.index(image, draft.userId);
+  } finally { image.fill(0); }
   ctx.rollbacks.push(async () => {
     await this.face.delete(reference);
   });
@@ -215,6 +221,7 @@ export class UserService {
     const captured=await this.face.captureImage(body.image_base64);
     const id=randomUUID(); const expiresAt=new Date(Date.now()+this.config.draftTtlSeconds*1000).toISOString();
     try {
+      await this.assertNewFace(ctx.db, captured.image, captured.metrics);
       await this.store.put('draft',id,{id,userId:randomUUID(),terminalId:request.terminal.terminal_id,
         expiresAt,lastActivityAt:new Date().toISOString(),recipients:[],image:captured.image.toString('base64')},expiresAt);
     } finally {captured.image.fill(0);}
@@ -231,6 +238,9 @@ export class UserService {
       const draft=await this.draft(request,id);
       await this.policy(ctx.db,'registration',body.policy_version);
       if (!draft.image) fail(409,'ENROLLMENT_INCOMPLETE','最初に顔写真を撮影してください。');
+      // Always acquire this before the audit-chain lock, including the legacy flow.
+      if (body.consent_result==='granted')
+        await ctx.db.query("SELECT pg_advisory_xact_lock(hashtextextended('anshin:face-registration', 0))");
       const consent=(await ctx.db.query(`INSERT INTO consents(temp_id,consent_type,policy_version,terminal_id,result,request_id)
         VALUES($1,'registration',$2,$3,$4,$5) RETURNING consent_id`,[id,body.policy_version,request.terminal.terminal_id,body.consent_result,request.id])).rows[0];
       await audit(ctx.db,this.config,request,'consent.registration','consent',consent.consent_id,body.consent_result==='granted'?'success':'denied');
@@ -242,6 +252,14 @@ export class UserService {
       const saved=await this.persistDraft(request,id,draft,ctx);
       return {...saved,body:{...saved.body,success:true,user_status:saved.body.status,registration_completed:false}};
     },ctx);
+  }
+  async assertNewFace(db, image, quality = {}) {
+    const found = await this.face.search(image);
+    const candidates = await this.candidates(db, found);
+    const duplicate = candidates.find(candidate => candidate.score >= this.config.matchThreshold);
+    if (duplicate) fail(409, 'FACE_ALREADY_REGISTERED', 'すでに登録されています。登録済みの方の操作を選ぶか、スタッフへお声がけください。', {
+      ...quality, similarity_score: duplicate.score * 100, match_threshold: this.config.matchThreshold * 100,
+    });
   }
   async candidates(db, found, onlyUserId = null) {
     const ids = [...new Set(found.candidates.map(c => c.userId).filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id ?? '')))];

@@ -13,6 +13,7 @@
     "test:integration": "node --test --test-concurrency=1 test/integration/*.test.js",
     "docs:generate": "node scripts/generate-openapi.js",
     "provision:dev": "node scripts/provision-dev.js",
+    "provision:admin": "node scripts/provision-admin.js",
     "check:rekognition": "node scripts/check-rekognition.js",
     "check:rekognition:liveness": "node scripts/check-rekognition.js --liveness",
     "check:smtp": "node scripts/check-smtp.js",

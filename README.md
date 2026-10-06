@@ -7,7 +7,7 @@
 | ディレクトリ | 内容 |
 | --- | --- |
 | [anshin-anpi-admin-source](anshin-anpi-admin-source/README.md) | 利用者画面とPC向け管理者画面（`/admin`）を含む実装 |
-| [backend](backend/README.md) | Node.js/Fastifyによる利用者向けAPI、PostgreSQL接続、AWS連携 |
+| [backend](backend/README.md) | Node.js/Fastifyによる利用者・管理者API、共有PostgreSQL、AWS連携 |
 
 フロントエンドは`anshin-anpi-admin-source/`、Node.jsバックエンドは`backend/`で開発します。起動方法、画面一覧、API接続方法は、それぞれのREADMEと`docs/`を参照してください。
 
@@ -23,7 +23,7 @@ npm run dev
 
 開発サーバーが表示するURLで利用者画面を開き、`/admin`で管理者画面を確認できます。
 
-画面内の処理は現在も表示確認用です。Node.jsの利用者向けAPIを`backend/`に実装しており、画面との接続およびAWSの顔認識・配信サービスの設定は[バックエンド資料](backend/README.md)を参照してください。
+管理画面は単一管理者のメールアドレス・パスワード認証と共有データベースに接続済みです。初期パスワード、接続先、操作方法は[管理端資料](backend/docs/ADMIN_API.md)を参照してください。AWSの顔認識・配信サービスの設定は[バックエンド資料](backend/README.md)に記載しています。
 
 依存パッケージ、ビルド出力、ローカルキャッシュ、環境変数ファイルはGitの管理対象から除外しています。
 

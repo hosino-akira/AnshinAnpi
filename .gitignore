@@ -34,6 +34,7 @@ __pycache__/
 *.p12
 *.pfx
 backend/.local-terminal.json
+backend/.admin-setup.json
 
 # Local database exports and backups (keep migration SQL tracked)
 /database/backups/

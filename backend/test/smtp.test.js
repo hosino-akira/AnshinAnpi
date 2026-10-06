@@ -20,6 +20,8 @@ test('SMTP config validates TLS and addresses and accepts password from Secrets 
   assert.equal(result.smtpSecure, false);
   assert.equal(readMailConfig({ SMTP_PORT: '465' }).smtpSecure, true);
   assert.equal(readMailConfig({ SMTP_PASSWORD: ' pass with spaces ' }).smtpPassword, ' pass with spaces ');
+  assert.equal(readMailConfig({ FACILITY_NAME: ' 実際の施設 ' }).facilityName, '実際の施設');
+  assert.equal(readMailConfig({ FACILITY_NAME: ' ' }).facilityName, 'ご利用施設');
   for (const bad of [{ SMTP_PORT: 'bad' }, { SMTP_PORT: '0' }, { SMTP_PORT: '65536' }, { SMTP_PORT: '12.5' },
     { SMTP_SECURE: 'yes' }, { SMTP_SECURE: 'true', SMTP_PORT: '587' }, { SMTP_SECURE: 'false', SMTP_PORT: '465' },
     { SMTP_HOST: 'smtp://example.com' }, { SMTP_FROM_EMAIL: 'Name <a@example.com>' }, { SMTP_REPLY_TO_EMAIL: 'invalid' }])

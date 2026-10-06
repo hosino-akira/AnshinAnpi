@@ -13,6 +13,8 @@ POST / DELETE 使用 Content-Type: application/json 和 Idempotency-Key: <本次
 
 ## 注册顺序
 
+仅注册成功的 `active` 用户视为已登记。注册①发现与现有 `active` 用户高度匹配时返回 HTTP 409、`error.code=FACE_ALREADY_REGISTERED`，不返回 `temp_id`。注册③会再次检查已完成登记，不因姓名不同而允许重复登记。`pending_registration`、仅拍照或中途放弃的记录不阻止重新登记，也不会被安否识别匹配；二次登记验证仅匹配本次登记的 `user_id`，不会受其他未完成记录干扰。登记验证通过且通知全部被邮件服务器受理后，状态才变为 `active`。前端遇到 `FACE_ALREADY_REGISTERED` 时提示“已登记，请选择登记済み流程”。该响应不透露已有用户的姓名和 ID。
+
 | 步骤 | 请求 | 响应及页面处理 |
 | --- | --- | --- |
 | ① 第一次采集 | POST /v1/registrations/capture；image_base64 | face_valid、temp_id、expires_at；通过后继续填写资料 |

@@ -628,3 +628,12 @@
   .account-form-actions button { width: 100%; }
   .admin-sheet [data-slot="sheet-header"], .sheet-body, .admin-sheet [data-slot="sheet-footer"] { padding-inline: 18px; }
 }
+/* 実データの管理操作と本人確認。顔原画像は表示・保存しません。 */
+.face-placeholder { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 50%; background: #e8eef2; color: #456175; }
+.admin-confirm { display: flex; gap: 10px; align-items: flex-start; margin: 16px 0; font-size: 14px; line-height: 1.7; }
+.admin-confirm input { margin-top: 5px; width: 18px; height: 18px; }
+.admin-data-controls { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.policy-controls { display: grid; gap: 12px; margin-bottom: 18px; }
+.policy-controls select { padding: 10px; border: 1px solid #ccd8df; border-radius: 8px; background: white; }
+.face-reenroll { padding: 14px; border: 1px solid #ccd8df; border-radius: 8px; }
+.face-reenroll details p { white-space: pre-wrap; line-height: 1.8; }

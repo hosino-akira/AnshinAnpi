@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { transaction } from './db.js';
 import { audit } from './audit.js';
 import { MailFailure } from './mail-failure.js';
+import { safetyTemplate } from './admin-settings.js';
 
 export async function updateCheck(db, checkId) {
   if (!checkId) return;
@@ -54,8 +55,11 @@ export class MailWorker {
       const request = { id: randomUUID(), terminal };
       try {
         const result = await this.mail.send({ email: await this.cipher.open(delivery.encrypted_email_snapshot, 'recipient-email'),
-          displayName: await this.cipher.open(user.display_name, 'user-name'), occurredAt: check.created_at,
-          timezone: terminal.timezone, type: check.check_type, deliveryId: id });
+          displayName: await this.cipher.open(user.display_name, 'user-name'),
+          recipientName: await this.cipher.open(recipient.name, 'recipient-name'), facilityName: this.config.facilityName,
+          occurredAt: check.check_type === 'registration' ? user.created_at : check.created_at,
+          timezone: terminal.timezone, type: check.check_type, deliveryId: id,
+          template: check.check_type === 'safety' ? await safetyTemplate(db) : undefined });
         await db.query(`UPDATE mail_deliveries SET status='accepted',provider_message_id=$2,accepted_at=clock_timestamp(),error_code=NULL WHERE delivery_id=$1`, [id, result.messageId]);
         await audit(db, this.config, request, 'mail.accepted', 'delivery', id);
       } catch (error) {
@@ -94,7 +98,13 @@ export class MailWorker {
     if (this.busy) return;
     this.busy = true;
     try {
-      if (Date.now() - this.lastMaintenance > 60000) { await this.maintain(); await this.cleanFaces(); this.lastMaintenance = Date.now(); }
+      if (Date.now() - this.lastMaintenance > 60000) {
+        await this.maintain(); await this.cleanFaces();
+        // External features must be removed before the remaining DB references.
+        await this.pool.query(`DELETE FROM users u WHERE status='deleted' AND purge_after<=clock_timestamp()
+          AND NOT EXISTS(SELECT 1 FROM face_templates f WHERE f.user_id=u.user_id AND f.status<>'deleted')`);
+        this.lastMaintenance = Date.now();
+      }
       if (this.mail.ready) {
         for (let i = 0; i < 4; i++) { const id = await this.claim(); if (!id) break; await this.deliver(id); }
       }
