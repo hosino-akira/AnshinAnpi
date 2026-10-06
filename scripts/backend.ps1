@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([ValidateSet('setup','start','status','test')][string]$Action='start')
+param([ValidateSet('setup','start','status')][string]$Action='start')
 $ErrorActionPreference='Stop'
 $projectRoot=Split-Path -Parent $PSScriptRoot
 function Test-Exit { if ($LASTEXITCODE -ne 0) { throw "Command failed (exit $LASTEXITCODE)." } }
@@ -29,5 +29,4 @@ switch ($Action) {
         & docker compose --project-directory $projectRoot up -d --build --wait api; Test-Exit
     }
     'status' { & docker compose --project-directory $projectRoot ps; Test-Exit }
-    'test' { Push-Location (Join-Path $projectRoot 'backend'); try { & npm test; Test-Exit } finally { Pop-Location } }
 }

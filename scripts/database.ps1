@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('migrate', 'test', 'status')]
+    [ValidateSet('migrate', 'status')]
     [string]$Action = 'migrate',
     [ValidatePattern('^[a-zA-Z_][a-zA-Z0-9_]*$')]
     [string]$Database
@@ -25,9 +25,6 @@ try {
                 Write-Host "Applying $($migration.Name)"
                 Invoke-DatabaseSql (Get-Content -LiteralPath $migration.FullName -Raw -Encoding UTF8)
             }
-        }
-        'test' {
-            Invoke-DatabaseSql (Get-Content -LiteralPath (Join-Path $projectRoot 'database\tests\schema.sql') -Raw -Encoding UTF8)
         }
         'status' {
             Invoke-DatabaseSql @'

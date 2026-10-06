@@ -1,45 +1,48 @@
-# 数据库结构：式样书 v1.0
+# 数据库说明
 
-管理端迁移 `005_single_admin.sql` 和 `006_password_only_admin.sql` 保留以下八张共享业务表，仅在 `app_meta` 增加单管理员和版本化设置两张辅助表；审计记录增加用途字段，既有签名仍可校验。管理员、邮件模板和同意文面均由后端统一访问，见 [管理端说明](../backend/docs/ADMIN_API.md)。
+用户端、管理端共用 PostgreSQL。业务数据在 public 中，管理员账号、管理设置和迁移记录在 app_meta 中。
 
-依据 `安心安否確認システム_開発仕様書_v1.0_正式版.xlsx` 的 `10_データ仕様`，第 10.1 节 A6:H13。
-PostgreSQL 的 `public` 中仅保留下列 8 张业务表。完整字段、类型、约束见 [spec-v1-schema.sql](spec-v1-schema.sql)。
+## 业务表
 
-| 表 | 式样书主要字段 | 用途 |
-|---|---|---|
-| users | user_id, display_name, status, created_at, updated_at | 登记者 |
-| face_templates | template_id, user_id, encrypted_template, model_version, threshold_version, status | 加密的 Rekognition Collection/FaceId 引用 |
-| recipients | recipient_id, user_id, name, encrypted_email, order_no, status | 1～2 个联系人 |
-| consents | consent_id, user_id/temp_id, policy_version, consented_at, terminal_id, result | 同意履历；consent_type 区分注册、安否 |
-| safety_checks | check_id, user_id, terminal_id, verified_at, consent_id, status | 注册确认或安否邮件操作 |
-| mail_deliveries | delivery_id, check_id, recipient_id, provider_message_id, status, accepted_at | 各收件人的邮件结果 |
-| audit_logs | log_id, actor_type, actor_id, action, target_type, target_id, result, occurred_at | 操作记录 |
-| terminals | terminal_id, facility_id, status, app_version, last_seen_at | 端末配置 |
+| 表 | 用途 |
+|---|---|
+| users | 登记者姓名、使用状态和登记时间 |
+| face_templates | 加密的人脸服务引用和识别资格 |
+| recipients | 每位用户最多两个联系人的姓名、邮箱和状态 |
+| consents | 登记和发送同意的版本、时间与结果 |
+| safety_checks | 登记通知、安否通知和联系人变更通知的操作记录 |
+| mail_deliveries | 每个收件人的发送状态、失败原因和重试信息 |
+| audit_logs | 管理及业务操作的签名审计记录 |
+| terminals | 固定机器人配置和最近连接时间 |
 
-式样书列的是“主要項目”，不是完整物理字段。仅补充现有接口需要的临时 ID 关联、端末凭据、邮件操作编号、有效期、尝试次数等字段。删除姓名和邮箱检索摘要、row_version、独立设施表及工作租约表。`display_name`、`recipients.name` 使用式样书的字段名，仍以 bytea 保存现有密文，API 返回解密后的字符串。
+app_meta.administrator 保存单管理员账号，app_meta.admin_settings 保存版本化设置，app_meta.schema_migrations 记录已执行的迁移。
 
-同意文面及版本在 [backend/config/consent-policies.json](../backend/config/consent-policies.json) 中配置；`consents.policy_version` 保存实际同意的版本。修改文面时增加版本、将旧版标记 retired、每种类型仅保留一个 published 版本，重启后端生效。GET `/v1/consent-policies?type=registration` 的合同保持不变。
+姓名、邮箱和人脸服务引用加密保存；原始照片不写入业务数据库。管理员账号、联系人、邮件模板和个人信息文案的操作见 [管理端说明](../backend/docs/ADMIN_API.md)。
 
-不使用 Redis。临时照片、草稿、短期会话及 15 分钟内的成功响应仅保存在一个 Node.js 进程的内存中，到期物理清除。后端重启后未完成操作需要重新开始。发送编号在 `safety_checks` 有永久唯一约束，重启后同一个发送编号仍能查询原结果，不会再创建邮件。该实现面向单进程使用，不支持多副本共享临时操作。
+## 启动与初始化
 
-技术性的迁移记录在 `app_meta.schema_migrations`，不属于业务模型：全库共 8 张业务表和 1 张迁移记录表。历史 001～003 仅用于旧库升级和迁移历史；最终结构由 004 收敛。
+根目录 .env 配置 POSTGRES_DB、POSTGRES_USER、POSTGRES_PASSWORD 和 POSTGRES_PORT。默认本机连接地址为 127.0.0.1:5433，Compose 内部连接 postgres:5432。
 
-## 旧数据库升级
-
-先停止访问数据库的旧版 API，保存 `pg_dump -Fc` 备份到 Git 忽略的 `database/backups/`，然后执行：
+在项目根目录执行：
 
 ```powershell
-# 项目根目录；必须先备份旧库并导出文面
-node backend/scripts/export-consent-policies.js
+docker compose up -d --wait postgres
 .\scripts\database.ps1 -Action migrate
-.\scripts\database.ps1 -Action test
 .\scripts\database.ps1 -Action status
 ```
 
-004 在单个事务内迁移现有 8 张表的数据，保留 ID、加密数据、邮件结果及原有审计链；完成后删除旧表和依赖触发器。正在操作的旧会话失效。若仍有旧版外部人脸清理任务，迁移会回滚，需先用旧版清理程序完成任务。永久删除模板前应先将其状态改为 revoked，让邮件工作进程清除 AWS 引用。
+保留 migrations 中的全部 SQL 文件；初始化依次执行这些文件，已执行的版本会跳过。新数据卷也会通过 Compose 自动执行迁移。
 
-完整流程的集成测试使用独立 PostgreSQL 数据库和测试版脸部／邮件服务，不发送真实邮件：
+## 临时数据与有效期
 
-```powershell
-.\scripts\test-backend-integration.ps1
-```
+临时照片、登记草稿和人脸会话只在单个后端进程的加密内存中保存。登记草稿和人脸会话最长 15 分钟，连续 5 分钟没有相关有效接口调用时失效；本地屏幕操作不会刷新后端计时。已成功请求的响应缓存 15 分钟。
+
+后端重启会结束未完成的临时操作。邮件发送编号在 safety_checks 中保持唯一，同一发送请求重试不会重复创建邮件。此实现使用单后端进程，不支持多个实例共享临时会话。
+
+## 文案与数据保留
+
+同意文案初始值在 [consent-policies.json](../backend/config/consent-policies.json)，运行中的管理设置保存于数据库；通过管理端发布个人信息文案的新版本和适用日期，不覆盖已有同意履历。
+
+用户删除后立即擦除业务姓名、邮箱和邮件快照；人脸服务引用由后台工作进程清理。30 天保留期结束且外部清理完成后再物理删除用户行，因此需要保持工作进程启用。
+
+PostgreSQL 数据保存在 Compose 的命名卷中，停止容器不会删除数据；备份和数据导出文件应单独保存。
