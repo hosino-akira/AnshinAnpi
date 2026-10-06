@@ -86,7 +86,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { adminApi, type AdminSession, type AdminSettings, type Dashboard, type Policy } from "@/lib/admin-api";
+import {
+  adminApi,
+  type AdminSession,
+  type AdminSettings,
+  type Dashboard,
+  type Policy,
+} from "@/lib/admin-api";
 import "./admin.css";
 
 type AdminView =
@@ -95,9 +101,11 @@ type AdminView =
   | "recipients"
   | "mailTemplate"
   | "privacy"
-  | "admin"
-  | "audit";
-type UserStatus = "active" | "suspended" | "pending_registration";
+  | "admin";
+type UserStatus =
+  | "active"
+  | "suspended"
+  | "pending_registration";
 type FaceStatus = "registered" | "renewal";
 type Recipient = {
   id: string;
@@ -136,19 +144,55 @@ type FlashMessage = {
   text: string;
 } | null;
 
-const INITIAL_ADMIN: AdminAccount = { name: "", email: "", lastLoginAt: "—", lastLoginIp: "—" };
-const INITIAL_PRIVACY = "", INITIAL_MAIL_SUBJECT = "", INITIAL_MAIL_BODY = "";
-const MAIL_TEMPLATE_VARIABLES = ['{{送信先名}}', '{{登録者名}}', '{{確認日時}}', '{{施設名}}'] as const;
-const renderMailSample = (text: string) => text.replace(/\{\{(送信先名|登録者名|確認日時|施設名)\}\}/g,
-  (_, key: string) => ({送信先名: '山田 花子', 登録者名: '山田 太郎', 確認日時: '2026/10/06 10:30', 施設名: '安心施設'} as Record<string, string>)[key]);
-const formatDate = (value: string | null | undefined) => value ? new Intl.DateTimeFormat("ja-JP", {timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false}).format(new Date(value)) : "—";
-const errorText = (error: unknown) => error instanceof Error ? error.message : "処理を完了できません。";
+const INITIAL_ADMIN: AdminAccount = {
+  name: "",
+  email: "",
+  lastLoginAt: "—",
+  lastLoginIp: "—",
+};
+const INITIAL_PRIVACY = "",
+  INITIAL_MAIL_SUBJECT = "",
+  INITIAL_MAIL_BODY = "";
+const MAIL_TEMPLATE_VARIABLES = [
+  "{{送信先名}}",
+  "{{登録者名}}",
+  "{{確認日時}}",
+  "{{施設名}}",
+] as const;
+const renderMailSample = (text: string) =>
+  text.replace(
+    /\{\{(送信先名|登録者名|確認日時|施設名)\}\}/g,
+    (_, key: string) =>
+      (
+        ({
+          送信先名: "山田 花子",
+          登録者名: "山田 太郎",
+          確認日時: "2026/10/06 10:30",
+          施設名: "安心施設",
+        }) as Record<string, string>
+      )[key],
+  );
+const formatDate = (value: string | null | undefined) =>
+  value
+    ? new Intl.DateTimeFormat("ja-JP", {
+        timeZone: "Asia/Tokyo",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).format(new Date(value))
+    : "—";
+const errorText = (error: unknown) =>
+  error instanceof Error
+    ? error.message
+    : "処理を完了できません。";
 
 const VIEW_COPY: Record<
   AdminView,
   { title: string; description: string }
 > = {
-  audit: {title: "操作記録", description: "管理者操作と送信・照合の記録を確認します。"},
   dashboard: {
     title: "管理状況",
     description: "登録状況と直近の変更を確認できます。",
@@ -185,7 +229,11 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function StatusBadge({ status }: { status: UserStatus }) {
   return (
     <span className={`admin-status ${status}`}>
-      {status === "active" ? "利用中" : status === "pending_registration" ? "登録確認中" : "利用停止"}
+      {status === "active"
+        ? "利用中"
+        : status === "pending_registration"
+          ? "登録確認中"
+          : "利用停止"}
     </span>
   );
 }
@@ -203,8 +251,20 @@ function FaceBadge({ status }: { status: FaceStatus }) {
   );
 }
 
-function FacePhoto({user}: {user: RegisteredUser; size?: "table" | "large"}) {
-  return <span className="face-placeholder" aria-label={`${user.name}さん`}><UserRound aria-hidden="true" /></span>;
+function FacePhoto({
+  user,
+}: {
+  user: RegisteredUser;
+  size?: "table" | "large";
+}) {
+  return (
+    <span
+      className="face-placeholder"
+      aria-label={`${user.name}さん`}
+    >
+      <UserRound aria-hidden="true" />
+    </span>
+  );
 }
 
 export default function AdminPage() {
@@ -221,6 +281,10 @@ export default function AdminPage() {
   const [showLoginPassword, setShowLoginPassword] =
     useState(false);
   const [loginError, setLoginError] = useState("");
+  const loginErrorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (loginError) loginErrorRef.current?.focus();
+  }, [loginError]);
   const [currentPassword, setCurrentPassword] =
     useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -229,9 +293,7 @@ export default function AdminPage() {
   const [adminFormError, setAdminFormError] = useState("");
   const [view, setView] = useState<AdminView>("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [users, setUsers] = useState<RegisteredUser[]>(
-    [],
-  );
+  const [users, setUsers] = useState<RegisteredUser[]>([]);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
     "all" | UserStatus
@@ -253,23 +315,19 @@ export default function AdminPage() {
   const [savedMailBody, setSavedMailBody] = useState(
     INITIAL_MAIL_BODY,
   );
-  const [mailSavedAt, setMailSavedAt] = useState(
-    "—",
-  );
+  const [mailSavedAt, setMailSavedAt] = useState("—");
   const [privacyText, setPrivacyText] =
     useState(INITIAL_PRIVACY);
   const [savedPrivacyText, setSavedPrivacyText] =
     useState(INITIAL_PRIVACY);
-  const [privacyVersion, setPrivacyVersion] =
-    useState("");
-  const [privacyDate, setPrivacyDate] =
-    useState(new Date().toLocaleDateString("en-CA"));
+  const [privacyVersion, setPrivacyVersion] = useState("");
+  const [privacyDate, setPrivacyDate] = useState(
+    new Date().toLocaleDateString("en-CA"),
+  );
   const [privacyMode, setPrivacyMode] = useState<
     "edit" | "preview"
   >("edit");
-  const [privacySavedAt, setPrivacySavedAt] = useState(
-    "—",
-  );
+  const [privacySavedAt, setPrivacySavedAt] = useState("—");
   const [activities, setActivities] = useState(
     [] as string[],
   );
@@ -277,80 +335,171 @@ export default function AdminPage() {
   const [isInteractive, setIsInteractive] = useState(false);
 
   const [busy, setBusy] = useState(false);
-  const [identityConfirmed, setIdentityConfirmed] = useState(false);
+  const [identityConfirmed, setIdentityConfirmed] =
+    useState(false);
   const [ownerPresent, setOwnerPresent] = useState(false);
   const [faceConsent, setFaceConsent] = useState(false);
   const [faceImage, setFaceImage] = useState("");
-  const [policyType, setPolicyType] = useState<"registration" | "safety">("registration");
-  const [policyTitle, setPolicyTitle] = useState("");
-  const [reconsent, setReconsent] = useState(false);
-  const [settings, setSettings] = useState<AdminSettings | null>(null);
-  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [settings, setSettings] =
+    useState<AdminSettings | null>(null);
+  const [dashboard, setDashboard] =
+    useState<Dashboard | null>(null);
   const [mailRevision, setMailRevision] = useState("");
-  const [auditLogs, setAuditLogs] = useState<{log_id: string; action: string; target_id: string | null; result: string; occurred_at: string; reason: string | null}[]>([]);
-  const [auditBefore, setAuditBefore] = useState<string | null>(null);
-  const MAIL_ERRORS = (dashboard?.errors ?? []).map(error => ({...error, occurredAt: formatDate(error.occurredAt), reason: error.status === "unknown" ? "受理結果が不明です。重複送信を避け、送信記録を確認してください。" : error.status === "bounced" ? "配信できませんでした。送信先を確認してください。" : "メール送信に失敗しました。"}));
+  const MAIL_ERRORS = (dashboard?.errors ?? []).map(
+    (error) => ({
+      ...error,
+      occurredAt: formatDate(error.occurredAt),
+      reason:
+        error.status === "unknown"
+          ? "受理結果が不明です。重複送信を避け、送信記録を確認してください。"
+          : error.status === "bounced"
+            ? "配信できませんでした。送信先を確認してください。"
+            : "メール送信に失敗しました。",
+    }),
+  );
   const setProfile = (profile: AdminSession["admin"]) => {
-    setAdminAccount({name: profile.name, email: profile.email, lastLoginAt: formatDate(profile.last_login_at), lastLoginIp: profile.last_login_ip ?? "—"});
-    setAdminDraft({name: profile.name, email: profile.email});
+    setAdminAccount({
+      name: profile.name,
+      email: profile.email,
+      lastLoginAt: formatDate(profile.last_login_at),
+      lastLoginIp: profile.last_login_ip ?? "—",
+    });
+    setAdminDraft({
+      name: profile.name,
+      email: profile.email,
+    });
   };
   const applyPolicy = (policy: Policy) => {
-    setPrivacyText(policy.body); setSavedPrivacyText(policy.body); setPrivacyVersion(policy.policy_version);
-    setPrivacyDate(policy.effective_date === "1970-01-01" ? new Date().toLocaleDateString("en-CA") : policy.effective_date); setPolicyTitle(policy.title); setReconsent(policy.requires_reconsent);
+    setPrivacyText(policy.body);
+    setSavedPrivacyText(policy.body);
+    setPrivacyVersion(policy.policy_version);
+    setPrivacyDate(
+      policy.effective_date === "1970-01-01"
+        ? new Date().toLocaleDateString("en-CA")
+        : policy.effective_date,
+    );
   };
-  const loadData = async (type: "registration" | "safety" = policyType) => {
-    const [list, summary, configuration] = await Promise.all([
-      adminApi<{users: RegisteredUser[]; total: number}>("/users?limit=200"),
-      adminApi<Dashboard>("/dashboard"), adminApi<AdminSettings>("/settings"),
-    ]);
-    setUsers(list.users); setDashboard(summary); setSettings(configuration);
-    setMailSubject(configuration.mail.subject); setSavedMailSubject(configuration.mail.subject);
-    setMailBody(configuration.mail.body); setSavedMailBody(configuration.mail.body);
-    setMailRevision(configuration.mail.revision); setMailSavedAt(formatDate(configuration.mail.updated_at));
-    const policy = configuration.policies.find(x => x.consent_type === type);
+  const loadData = async () => {
+    const [list, summary, configuration] =
+      await Promise.all([
+        adminApi<{
+          users: RegisteredUser[];
+          total: number;
+        }>("/users?limit=200"),
+        adminApi<Dashboard>("/dashboard"),
+        adminApi<AdminSettings>("/settings"),
+      ]);
+    setUsers(list.users);
+    setDashboard(summary);
+    setSettings(configuration);
+    setMailSubject(configuration.mail.subject);
+    setSavedMailSubject(configuration.mail.subject);
+    setMailBody(configuration.mail.body);
+    setSavedMailBody(configuration.mail.body);
+    setMailRevision(configuration.mail.revision);
+    setMailSavedAt(
+      formatDate(configuration.mail.updated_at),
+    );
+    const policy = configuration.policies.find(
+      (x) => x.consent_type === "registration",
+    );
     if (policy) applyPolicy(policy);
     setPrivacySavedAt("データベースから取得");
-    setActivities(summary.activities.map(x => `${formatDate(x.occurred_at)} ${x.action}`));
+    setActivities(
+      summary.activities.map(
+        (x) => `${formatDate(x.occurred_at)} ${x.action}`,
+      ),
+    );
   };
   const photoEpoch = useRef(0);
-  const closeEditor = () => { photoEpoch.current++; setEditingUser(null); setFaceImage(""); setOwnerPresent(false); setFaceConsent(false); };
+  const closeEditor = () => {
+    photoEpoch.current++;
+    setEditingUser(null);
+    setFaceImage("");
+    setOwnerPresent(false);
+    setFaceConsent(false);
+  };
   const clearSession = () => {
-    setIsAuthenticated(false); setUsers([]); closeEditor(); setDeleteTarget(null);
-    setDashboard(null); setSettings(null); setAuditLogs([]); setActivities([]); setFaceImage("");
-    setMailBody(""); setSavedMailBody(""); setPrivacyText(""); setSavedPrivacyText("");
-    setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
+    setIsAuthenticated(false);
+    setUsers([]);
+    closeEditor();
+    setDeleteTarget(null);
+    setDashboard(null);
+    setSettings(null);
+    setActivities([]);
+    setFaceImage("");
+    setMailBody("");
+    setSavedMailBody("");
+    setPrivacyText("");
+    setSavedPrivacyText("");
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
   };
   useEffect(() => {
     let cancelled = false;
-    const expired = () => { clearSession(); setLoginError("有効期限が切れました。再ログインしてください。"); };
-    window.addEventListener("admin-session-expired", expired);
-    void adminApi<AdminSession>("/session").then(async session => {
-      if (cancelled) return;
-      setProfile(session.admin); await loadData("registration"); setIsAuthenticated(true);
-    }).catch(error => { if (!cancelled && error.status !== 401) setLoginError(errorText(error)); });
-    return () => { cancelled = true; window.removeEventListener("admin-session-expired", expired); };
+    const expired = () => {
+      clearSession();
+      setLoginError(
+        "有効期限が切れました。再ログインしてください。",
+      );
+    };
+    window.addEventListener(
+      "admin-session-expired",
+      expired,
+    );
+    void adminApi<AdminSession>("/session")
+      .then(async (session) => {
+        if (cancelled) return;
+        setProfile(session.admin);
+        await loadData();
+        setIsAuthenticated(true);
+      })
+      .catch((error) => {
+        if (!cancelled && error.status !== 401)
+          setLoginError(errorText(error));
+      });
+    return () => {
+      cancelled = true;
+      window.removeEventListener(
+        "admin-session-expired",
+        expired,
+      );
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const loadAudit = async (append = false) => {
-    try {
-      const result = await adminApi<{logs: typeof auditLogs; next_before: string | null}>(`/audit-logs?limit=50&reason=audit${append && auditBefore ? `&before=${auditBefore}` : ""}`);
-      setAuditLogs(current => append ? [...current, ...result.logs] : result.logs); setAuditBefore(result.next_before);
-    } catch (error) { setFlash({tone: "error", text: errorText(error)}); }
-  };
   const searchUsers = async () => {
     try {
-      if (!query.trim()) { await loadData(); return; }
-      const result = await adminApi<{users: RegisteredUser[]}>("/users/search", "POST", {name: query.trim(), reason: "support"}); setUsers(result.users);
-    } catch (error) { setFlash({tone: "error", text: errorText(error)}); }
+      if (!query.trim()) {
+        await loadData();
+        return;
+      }
+      const result = await adminApi<{
+        users: RegisteredUser[];
+      }>("/users/search", "POST", {
+        name: query.trim(),
+        reason: "support",
+      });
+      setUsers(result.users);
+    } catch (error) {
+      setFlash({ tone: "error", text: errorText(error) });
+    }
   };
   const loadMoreUsers = async () => {
     try {
-      const result = await adminApi<{users: RegisteredUser[]}>(`/users?limit=200&offset=${users.length}`); setUsers(current => [...current, ...result.users]);
-    } catch (error) { setFlash({tone: "error", text: errorText(error)}); }
+      const result = await adminApi<{
+        users: RegisteredUser[];
+      }>(`/users?limit=200&offset=${users.length}`);
+      setUsers((current) => [...current, ...result.users]);
+    } catch (error) {
+      setFlash({ tone: "error", text: errorText(error) });
+    }
   };
 
   // クライアント側の操作機能が読み込まれたことを画面上でも確認できるようにします。
-  useEffect(() => { queueMicrotask(() => setIsInteractive(true)); }, []);
+  useEffect(() => {
+    queueMicrotask(() => setIsInteractive(true));
+  }, []);
 
   // 操作結果メッセージは一定時間後に自動で閉じます。
   useEffect(() => {
@@ -373,26 +522,51 @@ export default function AdminPage() {
       const matchesStatus =
         statusFilter === "all" ||
         user.status === statusFilter;
-      const matchesQuery = !keyword || user.name.toLowerCase() === keyword;
+      const matchesQuery =
+        !keyword || user.name.toLowerCase() === keyword;
       return matchesStatus && matchesQuery;
     });
   }, [query, statusFilter, users]);
 
-  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); if (busy) return; setBusy(true); setLoginError("");
+  const handleLogin = async (
+    event: FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setLoginError("");
     try {
-      const session = await adminApi<AdminSession>("/login", "POST", {email: loginEmail.trim().toLowerCase(), password: loginPassword});
-      setProfile(session.admin); setLoginPassword(""); await loadData(); setIsAuthenticated(true);
-    } catch (error) { setLoginError(errorText(error)); } finally { setBusy(false); }
+      const session = await adminApi<AdminSession>(
+        "/login",
+        "POST",
+        {
+          email: loginEmail.trim().toLowerCase(),
+          password: loginPassword,
+        },
+      );
+      setProfile(session.admin);
+      setLoginPassword("");
+      await loadData();
+      setIsAuthenticated(true);
+    } catch (error) {
+      setLoginError(errorText(error));
+    } finally {
+      setBusy(false);
+    }
   };
   const handleLogout = async () => {
-    try { await adminApi("/logout", "POST"); clearSession(); setView("dashboard"); setFlash(null); }
-    catch (error) { showFlash("error", errorText(error)); }
+    try {
+      await adminApi("/logout", "POST");
+      clearSession();
+      setView("dashboard");
+      setFlash(null);
+    } catch (error) {
+      showFlash("error", errorText(error));
+    }
   };
 
   const selectView = (nextView: AdminView) => {
     setView(nextView);
-    if (nextView === "audit") void loadAudit();
     setMobileNavOpen(false);
   };
 
@@ -403,21 +577,58 @@ export default function AdminPage() {
     setFlash({ tone, text });
   };
 
-  const saveAdminAccount = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); if (busy) return;
-    if (newPassword && (newPassword.length < 12 || newPassword !== confirmPassword)) { setAdminFormError("新しいパスワードは12文字以上で、確認欄と一致させてください。"); return; }
-    setBusy(true); setAdminFormError("");
+  const saveAdminAccount = async (
+    event: FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+    if (busy) return;
+    if (
+      newPassword &&
+      (newPassword.length < 12 ||
+        newPassword !== confirmPassword)
+    ) {
+      setAdminFormError(
+        "新しいパスワードは12文字以上で、確認欄と一致させてください。",
+      );
+      return;
+    }
+    setBusy(true);
+    setAdminFormError("");
     try {
-      await adminApi("/profile", "PUT", {name: adminDraft.name.trim(), email: adminDraft.email.trim(), current_password: currentPassword, ...(newPassword ? {new_password: newPassword} : {})});
-      clearSession(); setLoginError("管理者情報を保存しました。メールアドレスとパスワードで再ログインしてください。");
-    } catch (error) { setAdminFormError(errorText(error)); } finally { setBusy(false); }
+      await adminApi("/profile", "PUT", {
+        name: adminDraft.name.trim(),
+        email: adminDraft.email.trim(),
+        current_password: currentPassword,
+        ...(newPassword
+          ? { new_password: newPassword }
+          : {}),
+      });
+      clearSession();
+      setLoginError(
+        "管理者情報を保存しました。メールアドレスとパスワードで再ログインしてください。",
+      );
+    } catch (error) {
+      setAdminFormError(errorText(error));
+    } finally {
+      setBusy(false);
+    }
   };
   const refreshData = async () => {
-    try { await loadData(); showFlash("success", "最新のデータを読み込みました"); } catch (error) { showFlash("error", errorText(error)); }
+    try {
+      await loadData();
+      showFlash("success", "最新のデータを読み込みました");
+    } catch (error) {
+      showFlash("error", errorText(error));
+    }
   };
 
   const openUserEditor = (user: RegisteredUser) => {
-    setFormError(""); setIdentityConfirmed(false); photoEpoch.current++; setFaceImage(""); setOwnerPresent(false); setFaceConsent(false);
+    setFormError("");
+    setIdentityConfirmed(false);
+    photoEpoch.current++;
+    setFaceImage("");
+    setOwnerPresent(false);
+    setFaceConsent(false);
     setEditingUser({
       ...user,
       recipients: user.recipients.map((recipient) => ({
@@ -505,60 +716,196 @@ export default function AdminPage() {
       );
       return;
     }
-    if (!identityConfirmed) { setFormError("本人確認を実施したことを確認してください。"); return; }
+    if (!identityConfirmed) {
+      setFormError(
+        "本人確認を実施したことを確認してください。",
+      );
+      return;
+    }
     setBusy(true);
     try {
-      const resetFace = editingUser.faceStatus === "renewal" && users.find(x => x.id === editingUser.id)?.faceStatus === "registered";
-      const result = await adminApi<{user: RegisteredUser}>(`/users/${editingUser.id}`, "PUT", {
-        name: trimmedName, status: editingUser.status, recipients: recipients.map(x => ({name: x.name, email: x.email, ...(/^[0-9a-f-]{36}$/i.test(x.id) ? {id: x.id} : {})})),
-        expected_revision: editingUser.revision, identity_confirmed: true, reset_face: resetFace, reason: resetFace || editingUser.status === "suspended" ? "suspension" : "correction",
+      const resetFace =
+        editingUser.faceStatus === "renewal" &&
+        users.find((x) => x.id === editingUser.id)
+          ?.faceStatus === "registered";
+      const result = await adminApi<{
+        user: RegisteredUser;
+      }>(`/users/${editingUser.id}`, "PUT", {
+        name: trimmedName,
+        status: editingUser.status,
+        recipients: recipients.map((x) => ({
+          name: x.name,
+          email: x.email,
+          ...(/^[0-9a-f-]{36}$/i.test(x.id)
+            ? { id: x.id }
+            : {}),
+        })),
+        expected_revision: editingUser.revision,
+        identity_confirmed: true,
+        reset_face: resetFace,
+        reason:
+          resetFace || editingUser.status === "suspended"
+            ? "suspension"
+            : "correction",
       });
-      await loadData(); setEditingUser(resetFace ? result.user : null); setIdentityConfirmed(false);
-      showFlash("success", resetFace ? "旧顔データを無効化しました。本人立会いで顔を再登録してください。" : "登録者情報を保存しました");
-    } catch (error) { setFormError(errorText(error)); } finally { setBusy(false); }
+      await loadData();
+      setEditingUser(resetFace ? result.user : null);
+      setIdentityConfirmed(false);
+      showFlash(
+        "success",
+        resetFace
+          ? "旧顔データを無効化しました。本人立会いで顔を再登録してください。"
+          : "登録者情報を保存しました",
+      );
+    } catch (error) {
+      setFormError(errorText(error));
+    } finally {
+      setBusy(false);
+    }
   };
   const confirmDelete = async () => {
     if (!deleteTarget || busy) return;
-    const user = users.find(x => x.id === deleteTarget.userId); if (!user) return;
+    const user = users.find(
+      (x) => x.id === deleteTarget.userId,
+    );
+    if (!user) return;
     setBusy(true);
     try {
-      await adminApi(`/users/${user.id}${deleteTarget.kind === "recipient" ? `/recipients/${deleteTarget.recipientId}` : ""}`, "DELETE", {expected_revision: user.revision, reason: "deletion"});
-      setDeleteTarget(null); closeEditor(); await loadData(); showFlash("success", "削除を記録し、対象データを消去しました");
-    } catch (error) { showFlash("error", errorText(error)); } finally { setBusy(false); }
+      await adminApi(
+        `/users/${user.id}${deleteTarget.kind === "recipient" ? `/recipients/${deleteTarget.recipientId}` : ""}`,
+        "DELETE",
+        {
+          expected_revision: user.revision,
+          reason: "deletion",
+        },
+      );
+      setDeleteTarget(null);
+      closeEditor();
+      await loadData();
+      showFlash(
+        "success",
+        "削除を記録し、対象データを消去しました",
+      );
+    } catch (error) {
+      showFlash("error", errorText(error));
+    } finally {
+      setBusy(false);
+    }
   };
   const savePrivacy = async () => {
-    if (busy) return; setBusy(true);
+    if (busy) return;
+    setBusy(true);
     try {
-      await adminApi(`/policies/${policyType}`, "POST", {policy_version: privacyVersion.trim(), title: policyTitle.trim(), body: privacyText.trim(), effective_date: privacyDate, requires_reconsent: reconsent});
-      await loadData(); showFlash("success", "新しい文面を保存しました。指定日から適用されます。");
-    } catch (error) { showFlash("error", errorText(error)); } finally { setBusy(false); }
+      await adminApi("/policies/registration", "POST", {
+        policy_version: privacyVersion.trim(),
+        body: privacyText.trim(),
+        effective_date: privacyDate,
+      });
+      await loadData();
+      showFlash(
+        "success",
+        "新しい文面を保存しました。指定日から適用されます。",
+      );
+    } catch (error) {
+      showFlash("error", errorText(error));
+    } finally {
+      setBusy(false);
+    }
   };
   const saveMailTemplate = async () => {
-    if (busy) return; setBusy(true);
+    if (busy) return;
+    setBusy(true);
     try {
-      await adminApi("/mail-template", "PUT", {subject: mailSubject.trim(), body: mailBody.trim(), expected_revision: mailRevision});
-      await loadData(); showFlash("success", "送信メールの内容を保存しました");
-    } catch (error) { showFlash("error", errorText(error)); } finally { setBusy(false); }
+      await adminApi("/mail-template", "PUT", {
+        subject: mailSubject.trim(),
+        body: mailBody.trim(),
+        expected_revision: mailRevision,
+      });
+      await loadData();
+      showFlash(
+        "success",
+        "送信メールの内容を保存しました",
+      );
+    } catch (error) {
+      showFlash("error", errorText(error));
+    } finally {
+      setBusy(false);
+    }
   };
   const reenrollFace = async () => {
-    if (!editingUser || !faceImage || !ownerPresent || !faceConsent || busy) return;
-    const policy = settings?.policies.find(x => x.consent_type === "registration"); if (!policy) return;
+    if (
+      !editingUser ||
+      !faceImage ||
+      !ownerPresent ||
+      !faceConsent ||
+      busy
+    )
+      return;
+    const policy = settings?.policies.find(
+      (x) => x.consent_type === "registration",
+    );
+    if (!policy) return;
     setBusy(true);
     try {
-      await adminApi(`/users/${editingUser.id}/face`, "POST", {image_base64: faceImage, expected_revision: editingUser.revision, owner_present: true, consent_granted: true, policy_version: policy.policy_version});
-      setFaceImage(""); closeEditor(); await loadData(); showFlash("success", "顔を再登録し、利用を再開しました");
-    } catch (error) { setFormError(errorText(error)); } finally { setBusy(false); }
+      await adminApi(
+        `/users/${editingUser.id}/face`,
+        "POST",
+        {
+          image_base64: faceImage,
+          expected_revision: editingUser.revision,
+          owner_present: true,
+          consent_granted: true,
+          policy_version: policy.policy_version,
+        },
+      );
+      setFaceImage("");
+      closeEditor();
+      await loadData();
+      showFlash(
+        "success",
+        "顔を再登録し、利用を再開しました",
+      );
+    } catch (error) {
+      setFormError(errorText(error));
+    } finally {
+      setBusy(false);
+    }
   };
   const renewConsent = async () => {
-    const policy = settings?.policies.find(x => x.consent_type === 'registration');
-    if (!editingUser || !policy || !ownerPresent || !faceConsent || busy) return;
+    const policy = settings?.policies.find(
+      (x) => x.consent_type === "registration",
+    );
+    if (
+      !editingUser ||
+      !policy ||
+      !ownerPresent ||
+      !faceConsent ||
+      busy
+    )
+      return;
     setBusy(true);
     try {
-      const result = await adminApi<{user: RegisteredUser}>(`/users/${editingUser.id}/consent`, 'POST', {
-        expected_revision: editingUser.revision, owner_present: true, consent_granted: true, policy_version: policy.policy_version,
+      const result = await adminApi<{
+        user: RegisteredUser;
+      }>(`/users/${editingUser.id}/consent`, "POST", {
+        expected_revision: editingUser.revision,
+        owner_present: true,
+        consent_granted: true,
+        policy_version: policy.policy_version,
       });
-      await loadData(); setEditingUser(result.user); setOwnerPresent(false); setFaceConsent(false); showFlash('success', '新しい文面への同意を記録しました');
-    } catch (error) { setFormError(errorText(error)); } finally { setBusy(false); }
+      await loadData();
+      setEditingUser(result.user);
+      setOwnerPresent(false);
+      setFaceConsent(false);
+      showFlash(
+        "success",
+        "新しい文面への同意を記録しました",
+      );
+    } catch (error) {
+      setFormError(errorText(error));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const restoreMailTemplate = () => {
@@ -593,7 +940,6 @@ export default function AdminPage() {
       label: "個人情報取扱文面",
       icon: BookOpenText,
     },
-    { id: "audit" as const, label: "操作記録", icon: Activity },
     {
       id: "admin" as const,
       label: "管理者情報",
@@ -648,6 +994,7 @@ export default function AdminPage() {
           <form
             className="login-card"
             onSubmit={handleLogin}
+            aria-busy={busy}
           >
             <div className="login-card-head">
               <span>
@@ -721,14 +1068,27 @@ export default function AdminPage() {
               </div>
             </div>
             {loginError && (
-              <div className="login-error" role="alert">
+              <div
+                className="login-error"
+                role="alert"
+                id="login-error"
+                ref={loginErrorRef}
+                tabIndex={-1}
+              >
                 <CircleAlert aria-hidden="true" />
-                {loginError}
+                <div>
+                  <strong>ログインできませんでした</strong>
+                  <p>{loginError}</p>
+                </div>
               </div>
             )}
-            <Button type="submit" className="login-submit" disabled={busy}>
+            <Button
+              type="submit"
+              className="login-submit"
+              disabled={busy}
+            >
               <LogIn aria-hidden="true" />
-              ログイン
+              {busy ? "ログイン中…" : "ログイン"}
             </Button>
             <p className="login-security-note">
               <ShieldCheck aria-hidden="true" />
@@ -789,9 +1149,13 @@ export default function AdminPage() {
               <TableCell>
                 <div className="date-cell">
                   {!compact && (
-                    <small>登録 {formatDate(user.registeredAt)}</small>
+                    <small>
+                      登録 {formatDate(user.registeredAt)}
+                    </small>
                   )}
-                  <span>{formatDate(user.lastCheckAt)}</span>
+                  <span>
+                    {formatDate(user.lastCheckAt)}
+                  </span>
                 </div>
               </TableCell>
               <TableCell className="action-column">
@@ -1020,7 +1384,9 @@ export default function AdminPage() {
                       <em>件</em>
                     </strong>
                     <p>
-                      最大 {(dashboard?.counts.users ?? 0) * 2}件まで登録可能
+                      最大{" "}
+                      {(dashboard?.counts.users ?? 0) * 2}
+                      件まで登録可能
                     </p>
                   </div>
                 </article>
@@ -1031,10 +1397,14 @@ export default function AdminPage() {
                   <div>
                     <small>本日の安否確認</small>
                     <strong>
-                      {dashboard?.counts.today ?? 0}<em>件</em>
+                      {dashboard?.counts.today ?? 0}
+                      <em>件</em>
                     </strong>
                     <p>
-                      <b>{dashboard?.counts.accepted ?? 0}件</b>受理済み
+                      <b>
+                        {dashboard?.counts.accepted ?? 0}件
+                      </b>
+                      受理済み
                     </p>
                   </div>
                 </article>
@@ -1238,7 +1608,30 @@ export default function AdminPage() {
             </>
           )}
 
-          {(view === "users" || view === "recipients") && <div className="admin-data-controls"><Button variant="outline" onClick={() => void searchUsers()}>氏名完全一致で検索</Button><span>{users.length}件を表示 / 全{dashboard?.counts.users ?? 0}件</span>{!query && users.length < (dashboard?.counts.users ?? 0) && <Button variant="outline" onClick={() => void loadMoreUsers()}>次の200件</Button>}</div>}
+          {(view === "users" || view === "recipients") && (
+            <div className="admin-data-controls">
+              <Button
+                variant="outline"
+                onClick={() => void searchUsers()}
+              >
+                氏名完全一致で検索
+              </Button>
+              <span>
+                {users.length}件を表示 / 全
+                {dashboard?.counts.users ?? 0}件
+              </span>
+              {!query &&
+                users.length <
+                  (dashboard?.counts.users ?? 0) && (
+                  <Button
+                    variant="outline"
+                    onClick={() => void loadMoreUsers()}
+                  >
+                    次の200件
+                  </Button>
+                )}
+            </div>
+          )}
           {view === "users" && (
             <section className="admin-card management-card">
               <div className="management-toolbar">
@@ -1426,7 +1819,8 @@ export default function AdminPage() {
                   </Button>
                   <Button
                     className="admin-primary"
-                    onClick={saveMailTemplate} disabled={busy}
+                    onClick={saveMailTemplate}
+                    disabled={busy}
                   >
                     <ShieldCheck aria-hidden="true" />
                     メール文面を保存
@@ -1613,7 +2007,8 @@ export default function AdminPage() {
                   </Button>
                   <Button
                     className="admin-primary"
-                    onClick={savePrivacy} disabled={busy}
+                    onClick={savePrivacy}
+                    disabled={busy}
                   >
                     <ShieldCheck aria-hidden="true" />
                     文面を保存
@@ -1660,7 +2055,6 @@ export default function AdminPage() {
                       </button>
                     </div>
                   </div>
-                  <div className="policy-controls"><Label>文面の種類</Label><select value={policyType} onChange={event => { const type = event.target.value as "registration" | "safety"; setPolicyType(type); const policy = settings?.policies.find(x => x.consent_type === type); if (policy) applyPolicy(policy); }}><option value="registration">登録・個人情報</option><option value="safety">安否メール送信</option></select><Label htmlFor="policy-title">文面タイトル</Label><Input id="policy-title" value={policyTitle} onChange={event => setPolicyTitle(event.target.value)} /><label className="admin-confirm"><input type="checkbox" checked={reconsent} onChange={event => setReconsent(event.target.checked)} />重要変更として再同意を要求</label></div>
                   {privacyMode === "edit" ? (
                     <>
                       <Textarea
@@ -1724,7 +2118,7 @@ export default function AdminPage() {
                     </div>
                   )}
                 </section>
-                <aside className="privacy-side"><section className="admin-card"><h3>保存した文面の履歴</h3><p>変更時は新しい版番号を指定してください。</p><ul>{settings?.history.filter(x => x.consent_type === policyType).map(policy => <li key={policy.policy_version}>{policy.policy_version} / {policy.effective_date === '1970-01-01' ? '初期文面' : policy.effective_date}<Button variant="outline" onClick={() => applyPolicy(policy)}>表示</Button></li>)}</ul></section>
+                <aside className="privacy-side">
                   <section className="admin-card publish-card">
                     <div className="publish-icon">
                       <FilePenLine aria-hidden="true" />
@@ -1762,7 +2156,6 @@ export default function AdminPage() {
             </section>
           )}
 
-          {view === "audit" && <section className="admin-card"><div className="card-head"><h2>操作記録</h2><Button variant="outline" onClick={() => void loadAudit()}>再読み込み</Button></div><Table><TableHeader><TableRow><TableHead>日時</TableHead><TableHead>操作</TableHead><TableHead>対象</TableHead><TableHead>結果</TableHead><TableHead>用途</TableHead></TableRow></TableHeader><TableBody>{auditLogs.map(log => <TableRow key={log.log_id}><TableCell>{formatDate(log.occurred_at)}</TableCell><TableCell>{log.action}</TableCell><TableCell>{log.target_id ?? "—"}</TableCell><TableCell>{log.result}</TableCell><TableCell>{log.reason ?? "—"}</TableCell></TableRow>)}</TableBody></Table>{auditBefore && <Button onClick={() => void loadAudit(true)}>前の記録を表示</Button>}</section>}
           {view === "admin" && (
             <section className="admin-profile-grid">
               <aside className="admin-card admin-profile-summary">
@@ -1999,7 +2392,12 @@ export default function AdminPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {editingUser.status === "pending_registration" && <SelectItem value="pending_registration">登録確認中</SelectItem>}
+                        {editingUser.status ===
+                          "pending_registration" && (
+                          <SelectItem value="pending_registration">
+                            登録確認中
+                          </SelectItem>
+                        )}
                         <SelectItem value="active">
                           利用中
                         </SelectItem>
@@ -2024,7 +2422,15 @@ export default function AdminPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="registered" disabled={users.find(x => x.id === editingUser.id)?.faceStatus !== "registered"}>
+                        <SelectItem
+                          value="registered"
+                          disabled={
+                            users.find(
+                              (x) =>
+                                x.id === editingUser.id,
+                            )?.faceStatus !== "registered"
+                          }
+                        >
                           登録済み
                         </SelectItem>
                         <SelectItem value="renewal">
@@ -2037,7 +2443,9 @@ export default function AdminPage() {
                 <dl className="registration-meta">
                   <div>
                     <dt>登録日</dt>
-                    <dd>{formatDate(editingUser.registeredAt)}</dd>
+                    <dd>
+                      {formatDate(editingUser.registeredAt)}
+                    </dd>
                   </div>
                   <div>
                     <dt>同意文面</dt>
@@ -2045,25 +2453,159 @@ export default function AdminPage() {
                   </div>
                   <div>
                     <dt>最終安否確認</dt>
-                    <dd>{formatDate(editingUser.lastCheckAt)}</dd>
+                    <dd>
+                      {formatDate(editingUser.lastCheckAt)}
+                    </dd>
                   </div>
                 </dl>
               </section>
-              <label className="admin-confirm"><input type="checkbox" checked={identityConfirmed} onChange={event => setIdentityConfirmed(event.target.checked)} />本人確認を実施し、変更内容を確認しました。</label>
-              {settings?.policies.some(x => x.consent_type === 'registration' && x.requires_reconsent && x.policy_version !== editingUser.consentVersion) && <section>
-                <h3>最新文面への再同意</h3><p>{settings.policies.find(x => x.consent_type === 'registration')?.body}</p>
-                <label className="admin-confirm"><input type="checkbox" checked={ownerPresent} onChange={event => setOwnerPresent(event.target.checked)} />ご本人が立ち会っています。</label>
-                <label className="admin-confirm"><input type="checkbox" checked={faceConsent} onChange={event => setFaceConsent(event.target.checked)} />ご本人が文面を確認し、同意しました。</label>
-                <Button disabled={busy || !ownerPresent || !faceConsent} onClick={renewConsent}>再同意を記録</Button>
-              </section>}
-              {editingUser.status === "suspended" && users.find(x => x.id === editingUser.id)?.faceStatus === "renewal" && <section className="face-reenroll">
-                <h3>本人立会いで顔を再登録</h3><p>顔写真は一時的に処理し、原画像を保存しません。</p>
-                <Input type="file" accept="image/jpeg,image/png" onChange={event => { const file = event.target.files?.[0]; setFaceImage(""); if (!file) return; if (file.size > 512 * 1024) { setFormError("写真は512 KiB以下にしてください。"); return; } const reader = new FileReader(); const epoch = photoEpoch.current; reader.onload = () => { if (photoEpoch.current === epoch) setFaceImage(String(reader.result).split(",")[1] ?? ""); }; reader.readAsDataURL(file); }} />
-                <label className="admin-confirm"><input type="checkbox" checked={ownerPresent} onChange={event => setOwnerPresent(event.target.checked)} />ご本人が立ち会っています。</label>
-                <details><summary>現在の個人情報取扱文面</summary><p>{settings?.policies.find(x => x.consent_type === "registration")?.body}</p></details>
-                <label className="admin-confirm"><input type="checkbox" checked={faceConsent} onChange={event => setFaceConsent(event.target.checked)} />ご本人が現在の文面に同意しました。</label>
-                <Button disabled={busy || !faceImage || !ownerPresent || !faceConsent} onClick={reenrollFace}>顔を登録して利用再開</Button>
-              </section>}
+              <label className="admin-confirm">
+                <input
+                  type="checkbox"
+                  checked={identityConfirmed}
+                  onChange={(event) =>
+                    setIdentityConfirmed(
+                      event.target.checked,
+                    )
+                  }
+                />
+                本人確認を実施し、変更内容を確認しました。
+              </label>
+              {settings?.policies.some(
+                (x) =>
+                  x.consent_type === "registration" &&
+                  x.requires_reconsent &&
+                  x.policy_version !==
+                    editingUser.consentVersion,
+              ) && (
+                <section>
+                  <h3>最新文面への再同意</h3>
+                  <p>
+                    {
+                      settings.policies.find(
+                        (x) =>
+                          x.consent_type === "registration",
+                      )?.body
+                    }
+                  </p>
+                  <label className="admin-confirm">
+                    <input
+                      type="checkbox"
+                      checked={ownerPresent}
+                      onChange={(event) =>
+                        setOwnerPresent(
+                          event.target.checked,
+                        )
+                      }
+                    />
+                    ご本人が立ち会っています。
+                  </label>
+                  <label className="admin-confirm">
+                    <input
+                      type="checkbox"
+                      checked={faceConsent}
+                      onChange={(event) =>
+                        setFaceConsent(event.target.checked)
+                      }
+                    />
+                    ご本人が文面を確認し、同意しました。
+                  </label>
+                  <Button
+                    disabled={
+                      busy || !ownerPresent || !faceConsent
+                    }
+                    onClick={renewConsent}
+                  >
+                    再同意を記録
+                  </Button>
+                </section>
+              )}
+              {editingUser.status === "suspended" &&
+                users.find((x) => x.id === editingUser.id)
+                  ?.faceStatus === "renewal" && (
+                  <section className="face-reenroll">
+                    <h3>本人立会いで顔を再登録</h3>
+                    <p>
+                      顔写真は一時的に処理し、原画像を保存しません。
+                    </p>
+                    <Input
+                      type="file"
+                      accept="image/jpeg,image/png"
+                      onChange={(event) => {
+                        const file =
+                          event.target.files?.[0];
+                        setFaceImage("");
+                        if (!file) return;
+                        if (file.size > 512 * 1024) {
+                          setFormError(
+                            "写真は512 KiB以下にしてください。",
+                          );
+                          return;
+                        }
+                        const reader = new FileReader();
+                        const epoch = photoEpoch.current;
+                        reader.onload = () => {
+                          if (photoEpoch.current === epoch)
+                            setFaceImage(
+                              String(reader.result).split(
+                                ",",
+                              )[1] ?? "",
+                            );
+                        };
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                    <label className="admin-confirm">
+                      <input
+                        type="checkbox"
+                        checked={ownerPresent}
+                        onChange={(event) =>
+                          setOwnerPresent(
+                            event.target.checked,
+                          )
+                        }
+                      />
+                      ご本人が立ち会っています。
+                    </label>
+                    <details>
+                      <summary>
+                        現在の個人情報取扱文面
+                      </summary>
+                      <p>
+                        {
+                          settings?.policies.find(
+                            (x) =>
+                              x.consent_type ===
+                              "registration",
+                          )?.body
+                        }
+                      </p>
+                    </details>
+                    <label className="admin-confirm">
+                      <input
+                        type="checkbox"
+                        checked={faceConsent}
+                        onChange={(event) =>
+                          setFaceConsent(
+                            event.target.checked,
+                          )
+                        }
+                      />
+                      ご本人が現在の文面に同意しました。
+                    </label>
+                    <Button
+                      disabled={
+                        busy ||
+                        !faceImage ||
+                        !ownerPresent ||
+                        !faceConsent
+                      }
+                      onClick={reenrollFace}
+                    >
+                      顔を登録して利用再開
+                    </Button>
+                  </section>
+                )}
               <section>
                 <div className="section-title-row">
                   <div>
@@ -2199,7 +2741,8 @@ export default function AdminPage() {
             </Button>
             <Button
               className="admin-primary"
-              onClick={saveUser} disabled={busy}
+              onClick={saveUser}
+              disabled={busy}
             >
               変更を保存
             </Button>
@@ -2236,7 +2779,8 @@ export default function AdminPage() {
             </AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
-              onClick={confirmDelete} disabled={busy}
+              onClick={confirmDelete}
+              disabled={busy}
             >
               削除する
             </AlertDialogAction>

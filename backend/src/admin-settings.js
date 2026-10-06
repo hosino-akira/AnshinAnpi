@@ -4,7 +4,7 @@ import { SAFETY_MAIL_SUBJECT, SAFETY_MAIL_BODY } from './mail-message.js';
 export async function initializeAdminSettings(deps) {
   for (const policy of deps.policies ?? loadPolicies()) {
     await deps.pool.query(`INSERT INTO app_meta.admin_settings(setting_key,document) VALUES($1,$2) ON CONFLICT DO NOTHING`,
-      [`policy.${policy.consent_type}.${policy.policy_version}`, { ...policy, effective_date: '1970-01-01' }]);
+      [`policy.${policy.consent_type}.${policy.policy_version}`, { ...policy, effective_date: policy.effective_date ?? '1970-01-01' }]);
   }
   await deps.pool.query(`INSERT INTO app_meta.admin_settings(setting_key,document) VALUES('mail.safety',$1) ON CONFLICT DO NOTHING`,
     [{ subject: SAFETY_MAIL_SUBJECT, body: SAFETY_MAIL_BODY }]);

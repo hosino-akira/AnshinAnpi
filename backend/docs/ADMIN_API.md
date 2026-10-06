@@ -21,10 +21,12 @@
 
 ## API
 
-`POST /login` 请求 `{email,password}`，响应 `{admin,csrf_token}` 并设置 Cookie。`GET /session` 可在刷新页面后取得会话及 CSRF 令牌。以下路径均以 `/v1/admin` 开头，全部要求管理员 Cookie；所有写操作还要求 `X-CSRF-Token` 和 `Idempotency-Key`。
+`POST /login` 请求 `{email,password}`，响应 `{admin,csrf_token}` 并设置 Cookie。`GET /session` 可在刷新页面后取得会话及 CSRF 令牌。以下路径均以 `/v1/admin` 开头，除登录外全部要求管理员 Cookie；除登录外所有写操作还要求 `X-CSRF-Token` 和 `Idempotency-Key`。前端同源路径 `/api/admin` 与后端 `/v1/admin` 一一对应。目前本地地址为前端 `http://127.0.0.1:5173`、后端 `http://127.0.0.1:3002`。
 
 | 接口 | 用途 |
 |---|---|
+| POST `/login` | 邮箱及密码登录，创建会话 |
+| GET `/session` | 读取管理员信息及 CSRF 令牌 |
 | POST `/logout` | 撤销会话并清 Cookie |
 | PUT `/profile` | 修改名称、邮箱或密码；再次校验当前密码，保存后所有会话失效 |
 | GET `/dashboard` | 真实登记数、联系人数量、东京时区当日统计、邮件错误和近期操作 |
@@ -35,12 +37,41 @@
 | DELETE `/users/{id}/recipients/{recipientId}` | 删除联系人；最后一个有效联系人删除后自动停用用户 |
 | POST `/users/{id}/face` | 已停用用户在本人立会并同意后重新登记，恢复使用 |
 | POST `/users/{id}/consent` | 本人在场确认最新登记文面，记录新的同意履历 |
-| GET `/settings` | 当前邮件模板、两种同意文面及历史版本 |
+| GET `/settings` | 当前邮件模板、利用者个人信息文面及历史版本 |
 | PUT `/mail-template` | 保存安否邮件标题、正文；现有发送工作进程实时读取 |
-| POST `/policies/{registration或safety}` | 保存新版本和适用日期，不覆盖旧版本；按东京日期自动生效 |
-| GET `/audit-logs` | 按时间、目标、游标分页查看日志，不提供下载 |
+| POST `/policies/registration` | 保存新版本和适用日期，不覆盖旧版本；按东京日期自动生效 |
 
-字段和校验以 `openapi.json` 为准。记录用途仅允许 `support/correction/suspension/deletion/audit`，不会把姓名或任意备注加入审计。管理员操作、查询日志及拒绝的已认证操作均进入现有 HMAC 审计链。
+字段和校验以 `openapi.json` 为准。记录用途仅允许 `support/correction/suspension/deletion/audit`，不会把姓名或任意备注加入审计。管理员操作及拒绝的已认证操作均进入现有 HMAC 审计链；已删除操作记录侧栏、对应页面及查询接口。
+
+### 请求参数与响应
+
+请求正文为 JSON。除下表明确标为可选的字段，列出的字段均必填；路径中的 `id` 和 `recipientId` 为 UUID。`expected_revision` 必须原样使用读取该记录时得到的 `revision`。
+
+| 方法及路径 | 参数 | 主要响应 |
+|---|---|---|
+| POST `/login` | `email`, `password` | `admin`, `csrf_token`；设置 `anshin_admin` Cookie |
+| GET `/session` | 无 | `admin`, `csrf_token` |
+| POST `/logout` | `{}` | `logged_out: true`；清除 Cookie |
+| PUT `/profile` | `name`, `email`, `current_password`；可选 `new_password`（12～128 字符） | `admin`, `reauthenticate: true`，全部旧会话失效 |
+| GET `/dashboard` | 无 | `counts`, `errors`, `activities` |
+| GET `/users` | 可选查询 `limit`（1～200，默认 100）, `offset`（0～100000，默认 0） | `users`, `total`, `offset`, `limit` |
+| POST `/users/search` | `name`, `reason`；按完整姓名查询 | `users`, `total`, `offset`, `limit` |
+| PUT `/users/{id}` | `name`, `status`, `recipients`, `expected_revision`, `identity_confirmed: true`, `reason`；可选 `reset_face`（默认 false） | `user`, `notification_check_id` |
+| DELETE `/users/{id}` | `expected_revision`, `reason: "deletion"` | `deleted: true` |
+| DELETE `/users/{id}/recipients/{recipientId}` | `expected_revision`, `reason: "deletion"` | `user` |
+| POST `/users/{id}/face` | `image_base64`, `expected_revision`, `owner_present: true`, `consent_granted: true`, `policy_version` | `user`, `liveness_passed: false` |
+| POST `/users/{id}/consent` | `expected_revision`, `owner_present: true`, `consent_granted: true`, `policy_version` | `user` |
+| GET `/settings` | 无 | `mail`, `policies`, `history` |
+| PUT `/mail-template` | `subject`, `body`, `expected_revision` | `saved: true` |
+| POST `/policies/registration` | `policy_version`, `body`, `effective_date`（YYYY-MM-DD） | `published: true`, `effective_date` |
+
+登记者 `status` 允许 `active/suspended/pending_registration`。`recipients` 为 1～2 项 `{name,email,id?}`，保留原联系人时需带 `id`；新增联系人不带 `id`。姓名最长 50 字符，联系人邮箱不得重复。`reset_face: true` 会将用户停用，恢复时必须走脸部重新登记接口。
+
+管理员档案只返回 `name/email/last_login_at/last_login_ip`，不返回密码。每个登记者返回 `id/name/status/faceStatus/registeredAt/updatedAt/revision/lastCheckAt/consentVersion/recipients`，不返回原照片或脸部特征。
+
+失败响应为 `{error:{code,message,request_id}}`，校验错误可能另有 `details`。常用状态：400 输入无效、401 密码错误或会话失效、403 来源或 CSRF 校验失败、404 记录不存在、409 版本冲突、429 暂时限制、503 服务无法使用。登录页将缺失接口、无法连接、账号未初始化统一显示连接失败；密码错误显示邮箱或密码错误，限制和超时也有明确提示。错误区域使用与其他错误相同的红色样式，并自动获得焦点；登录期间禁用提交按钮。
+
+若登录返回 `Route POST:/v1/admin/login not found`，说明前端已连接到后端，但后端仍是未加载管理员接口的旧进程。更新代码后需重启后端；可通过 `/openapi.json` 检查 `/v1/admin/login` 的 POST 接口是否存在。
 
 ## 数据联动
 
@@ -49,11 +80,13 @@
 - 使用停止、删除或请求脸部重登会即时撤销识别资格，取消待发邮件。暂停后恢复使用需要本人立会重新登记脸部；不恢复已经撤销的云端特征。
 - 脸部重登沿用现有照片识别模式，检查图片质量和重复登记；不会声称通过活体检测。照片只在请求内存中处理，不保存原图；管理端使用通用头像。
 - 删除时马上清除业务姓名、邮箱及投递快照。AWS 特征由现有清理工作进程删除，30 天到期且外部特征清理成功后才物理删除用户行。必须保持邮件工作进程启用；若外部清理失败，保留清理引用供重试。
-- 同意文面发布必须使用新版本号，不允许过去日期。重要登记文面变化要求重新同意后才能安否发信；管理页面提供本人在场的再同意入口。未来文面保存后可在版本履历查看，用户端在适用日前仍取得原版本。
+- 同意文面发布必须使用新版本号，不允许过去日期。该管理页面只编辑利用者的个人信息文面，不提供文面类型、标题或强制再同意选项；新文面不强制已有用户重新同意。历史版本由设置接口保留，用户端在适用日前仍取得原版本。
 - 并发修改使用数据库行锁和完整时间戳 `revision`，旧页面保存返回 `409 ADMIN_REVISION_CHANGED`。管理操作的成功响应加密缓存 15 分钟；重启后版本检查及邮件唯一约束阻止重复变更通知。
 
 ## 验证
 
 `npm test` 覆盖密码、Cookie 和接口权限合同；根目录 `scripts/test-backend-integration.ps1` 使用独立测试库验证管理端和用户端的完整流程，不访问 AWS 或发送真实邮件。前端 `tests/admin-proxy.test.mjs` 验证 Cookie/CSRF 转发及跨站拒绝。`npm run verify:audit` 同时验证原有记录与新增管理记录。
 
-本次验证：后端单元测试 40/40、独立数据库集成测试 46/46、管理及用户代理测试 8/8；前端类型检查、修改文件的静态检查及生产构建通过。实际本地数据库经同源代理验证密码登录、五类读取接口、退出和旧会话拒绝，未发送真实邮件。前端全量测试另有两项模板断言失败：主页缺少 `codex-preview` 元数据，构建 CSS 缺少模板预期的滚动工具样式；对应主页布局、全局样式和原测试文件未在本次修改。
+本次验证：后端单元测试 41/41、独立数据库集成测试 46/46、前端错误处理及代理测试 12/12；前端类型检查、修改文件的静态检查及生产构建通过。实际本地数据库经同源代理验证密码登录、读取接口、退出和旧会话拒绝，未发送真实邮件。前端全量测试另有两项模板断言失败：主页缺少 `codex-preview` 元数据，构建 CSS 缺少模板预期的滚动工具样式；对应主页布局、全局样式和原测试文件未在本次修改。
+
+个人信息文面已按项目所有者提供的六段文字保存为 `privacy-v1`，2026-10-06 生效。旧版及既有同意记录保持不变。标题由正文首行取得，保存接口只接受正文、版号和适用日期；安否邮件发送同意文面不通过该管理页编辑。

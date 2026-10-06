@@ -121,10 +121,10 @@ test('SES ambiguous network errors cannot be automatically retried', async () =>
 });
 
 test('temporary draft has a physical idle TTL and completion lock lasts through commit', async () => {
-  const store = new TemporaryStore({temporaryKey:randomBytes(32),idleTtlSeconds:90});
+  const store = new TemporaryStore({temporaryKey:randomBytes(32),idleTtlSeconds:300});
   await store.put('draft','id',{ name:'temporary' },new Date(Date.now()+900000));
   const remaining=await store.state.ttl(store.key('draft','id'));
-  assert.ok(remaining>0 && remaining<=90);
+  assert.ok(remaining>299 && remaining<=300);
   const ctx={ commits:[],rollbacks:[] };
   await store.lock('draft','id',async()=>({ completed:true }),ctx);
   await assert.rejects(store.lock('draft','id',async()=>null),error=>error.code==='OPERATION_IN_PROGRESS');

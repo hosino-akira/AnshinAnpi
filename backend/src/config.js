@@ -75,7 +75,8 @@ export async function readConfig(env = process.env) {
     // Initial PoC settings, intentionally configurable rather than claimed accuracy guarantees.
     matchThreshold: Number(env.FACE_MATCH_THRESHOLD ?? 0.99), requiredMargin: Number(env.FACE_MATCH_MARGIN ?? 0.05),
     livenessThreshold: Number(env.FACE_LIVENESS_THRESHOLD ?? 0.99), thresholdVersion: env.FACE_THRESHOLD_VERSION ?? 'poc-v1',
-    draftTtlSeconds: 900, idleTtlSeconds: 90, verificationTtlSeconds: 180,
+    // 操作間隔は5分まで許容し、セッション全体は15分で終了します。
+    draftTtlSeconds: 900, idleTtlSeconds: 300, verificationTtlSeconds: 900,
     logLevel: env.LOG_LEVEL ?? 'info', workerEnabled: env.MAIL_WORKER_ENABLED !== 'false',
     apiDebugLogEnabled: !production && env.API_DEBUG_LOG_ENABLED === 'true',
     migrationsPath: fileURLToPath(new URL('../../database/migrations/', import.meta.url)),

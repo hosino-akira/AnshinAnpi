@@ -13,6 +13,9 @@ test('production cookie is HttpOnly Secure SameSite=Strict and OpenAPI separates
   assert.match(auth.cookie('value'),/HttpOnly; SameSite=Strict; Max-Age=28800; Secure$/);
   assert.match(auth.cookie('',true),/Max-Age=0/);
   const doc=openApiDocument();
+  assert.equal(doc.paths['/v1/admin/audit-logs'],undefined);
+  assert.equal(doc.paths['/v1/admin/policies/{type}'],undefined);
+  assert.ok(doc.paths['/v1/admin/policies/registration'].post);
   for (const [path,methods] of Object.entries(doc.paths)) if (path.startsWith('/v1/admin/') && !path.endsWith('/login'))
     for (const [method,route] of Object.entries(methods)) {
       assert.deepEqual(route.security,[{AdminCookie:[]}]);

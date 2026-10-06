@@ -24,8 +24,8 @@ export const adminSchemas = {
   template: z.strictObject({ subject: z.string().trim().min(1).max(200).refine(x => !/[\r\n\u0000]/.test(x)),
     body: z.string().trim().min(1).max(10000), expected_revision: revision }),
   policy: z.strictObject({ policy_version: z.string().regex(/^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,49}$/),
-    title: z.string().trim().min(1).max(100), body: z.string().trim().min(1).max(10000),
-    effective_date: z.iso.date(), requires_reconsent: z.boolean() }),
+    body: z.string().trim().min(1).max(10000),
+    effective_date: z.iso.date() }),
   face: z.strictObject({ ...bodySchemas.photoCapture.shape, expected_revision: revision, owner_present: z.literal(true),
     policy_version: z.string().min(1).max(50), consent_granted: z.literal(true) }),
   consent: z.strictObject({ expected_revision: revision, owner_present: z.literal(true),
@@ -46,8 +46,7 @@ export const adminRoutes = [
   ['post','/v1/admin/users/{id}/consent','本人在场重新同意当前登记文面','consent'],
   ['get','/v1/admin/settings','当前邮件模板及同意版本'],
   ['put','/v1/admin/mail-template','更新安否邮件模板','template'],
-  ['post','/v1/admin/policies/{type}','发布新的同意文面版本','policy'],
-  ['get','/v1/admin/audit-logs','分页审计查询（不提供下载）'],
+  ['post','/v1/admin/policies/registration','发布利用者显示的个人信息文面版本','policy'],
 ];
 
 export class AdminService {
@@ -247,8 +246,8 @@ export class AdminService {
   async settings(request) {
     return transaction(this.pool,async db=> {
       const mail=(await db.query("SELECT document,updated_at::text AS revision,updated_at FROM app_meta.admin_settings WHERE setting_key='mail.safety'")).rows[0];
-      const policies=await Promise.all(['registration','safety'].map(type=>publishedPolicy(db,this.policies,type)));
-      const history=(await db.query("SELECT document FROM app_meta.admin_settings WHERE setting_key LIKE 'policy.%' ORDER BY updated_at DESC LIMIT 100")).rows.map(x=>x.document);
+      const policies=[await publishedPolicy(db,this.policies,'registration')];
+      const history=(await db.query("SELECT document FROM app_meta.admin_settings WHERE setting_key LIKE 'policy.registration.%' ORDER BY updated_at DESC LIMIT 100")).rows.map(x=>x.document);
       await audit(db,this.config,request,'admin.settings.read','settings',null);
       return { mail:{...mail.document,revision:mail.revision,updated_at:mail.updated_at},policies,history };
     });
@@ -265,31 +264,19 @@ export class AdminService {
     });
   }
   async publishPolicy(request,body) {
-    const type=z.enum(['registration','safety']).parse(request.params.type);
+    const type='registration';
     return transaction(this.pool,async db=> {
       await db.query('SELECT pg_advisory_xact_lock(17001003)');
       const key=`policy.${type}.${body.policy_version}`;
       if ((await db.query('SELECT 1 FROM app_meta.admin_settings WHERE setting_key=$1',[key])).rowCount) fail(409,'POLICY_VERSION_EXISTS','新しい版番号を指定してください。');
       const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
       if (body.effective_date<today) fail(400,'POLICY_DATE_IN_PAST','適用日は本日以降にしてください。');
-      await db.query('INSERT INTO app_meta.admin_settings(setting_key,document) VALUES($1,$2)',[key,{...body,consent_type:type,status:'published'}]);
+      await db.query('INSERT INTO app_meta.admin_settings(setting_key,document) VALUES($1,$2)',[key,{...body,title:body.body.split('\n')[0].trim().slice(0,100),requires_reconsent:false,consent_type:type,status:'published'}]);
       await audit(db,this.config,request,'admin.policy.published','policy',key);
       return { published:true,effective_date:body.effective_date };
     });
   }
-  async logs(request) {
-    const query=z.object({limit:z.coerce.number().int().min(1).max(100).default(50),before:z.string().regex(/^\d+$/).optional(),
-      from:z.iso.datetime().optional(),to:z.iso.datetime().optional(),target_id:z.string().max(200).optional(),reason:reason.default('audit')}).parse(request.query);
-    return transaction(this.pool,async db=> {
-      const rows=(await db.query(`SELECT log_id,actor_type,actor_id,action,target_type,target_id,result,error_code,occurred_at,reason
-        FROM audit_logs WHERE ($1::bigint IS NULL OR log_id<$1) AND ($2::timestamptz IS NULL OR occurred_at>=$2)
-        AND ($3::timestamptz IS NULL OR occurred_at<=$3) AND ($4::text IS NULL OR target_id=$4) ORDER BY log_id DESC LIMIT $5`,
-        [query.before??null,query.from??null,query.to??null,query.target_id??null,query.limit])).rows;
-      request.auditReason=query.reason;
-      await audit(db,this.config,request,'admin.logs.read','audit_logs',null);
-      return { logs:rows,next_before:rows.length===query.limit ? String(rows.at(-1).log_id) : null };
-    });
-  }
+
 }
 
 export async function registerAdmin(app,deps) {
@@ -355,7 +342,6 @@ export async function registerAdmin(app,deps) {
     api.post('/v1/admin/users/:id/consent',mutate(adminSchemas.consent,(request,body)=>service.reconsent(request,body)));
     api.get('/v1/admin/settings',request=>service.settings(request));
     api.put('/v1/admin/mail-template',mutate(adminSchemas.template,(request,body)=>service.saveTemplate(request,body)));
-    api.post('/v1/admin/policies/:type',mutate(adminSchemas.policy,(request,body)=>service.publishPolicy(request,body)));
-    api.get('/v1/admin/audit-logs',request=>service.logs(request));
+    api.post('/v1/admin/policies/registration',mutate(adminSchemas.policy,(request,body)=>service.publishPolicy(request,body)));
   });
 }

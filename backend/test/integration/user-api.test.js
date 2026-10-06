@@ -208,11 +208,16 @@ test('a user ID from another user or terminal cannot read a send result', async 
     await store.put('session',hash,session,session.expires_at);
   }
 });
-test('expired and idle sessions do not reveal personal information', async () => {
+test('sessions allow four idle minutes but reject more than five without revealing personal information', async () => {
   const raw=await identify('person-a'); await success('POST','/v1/users/me/confirmation',{ confirmed:true },raw);
   const sessionHash=raw;
   const session=await store.get('session',sessionHash);
-  session.last_activity_at=new Date(Date.now()-91000).toISOString();
+  session.last_activity_at=new Date(Date.now()-240000).toISOString();
+  session.verified_at=session.last_activity_at;
+  session.expires_at=new Date(Date.parse(session.verified_at)+config.verificationTtlSeconds*1000).toISOString();
+  await store.put('session',sessionHash,session,session.expires_at);
+  assert.equal((await request('GET','/v1/users/me/recipients',undefined,raw)).status,200);
+  session.last_activity_at=new Date(Date.now()-301000).toISOString();
   await store.put('session',sessionHash,session,session.expires_at);
   assert.equal((await request('GET','/v1/users/me/recipients',undefined,raw)).status,409);
 });

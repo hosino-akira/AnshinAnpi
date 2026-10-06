@@ -6433,21 +6433,13 @@
         }
       }
     },
-    "/v1/admin/policies/{type}": {
+    "/v1/admin/policies/registration": {
       "post": {
-        "summary": "发布新的同意文面版本",
+        "summary": "发布利用者显示的个人信息文面版本",
         "tags": [
           "管理端"
         ],
         "parameters": [
-          {
-            "name": "type",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "X-CSRF-Token",
             "in": "header",
@@ -6558,11 +6550,6 @@
                     "type": "string",
                     "pattern": "^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,49}$"
                   },
-                  "title": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 100
-                  },
                   "body": {
                     "type": "string",
                     "minLength": 1,
@@ -6572,112 +6559,18 @@
                     "type": "string",
                     "format": "date",
                     "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
-                  },
-                  "requires_reconsent": {
-                    "type": "boolean"
                   }
                 },
                 "required": [
                   "policy_version",
-                  "title",
                   "body",
-                  "effective_date",
-                  "requires_reconsent"
+                  "effective_date"
                 ],
                 "additionalProperties": false
               }
             }
           }
         }
-      }
-    },
-    "/v1/admin/audit-logs": {
-      "get": {
-        "summary": "分页审计查询（不提供下载）",
-        "tags": [
-          "管理端"
-        ],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "成功"
-          },
-          "400": {
-            "description": "错误",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "错误",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "错误",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "错误",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "错误",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "错误",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "错误",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "AdminCookie": []
-          }
-        ]
       }
     }
   },

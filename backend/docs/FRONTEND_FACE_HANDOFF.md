@@ -64,6 +64,8 @@ Idempotency-Key: 11111111-1111-4111-8111-111111111111
 
 ## 结束操作
 
+后端登记草稿和人脸会话连续 5 分钟没有相关接口调用时失效，总有效期最长 15 分钟。相关有效请求刷新空闲计时，但不延长总有效期；屏幕触摸、本地输入或仅获取同意文案不会刷新后端计时。`/v1/terminal` 和首次采集响应中的 `idle_timeout_seconds` 为 300。草稿过期返回 `TIME-001`，人脸会话过期返回 `FACE_VERIFICATION_REQUIRED`；App 应清空本次操作信息并引导重新开始。界面弹框、倒计时及返回首页仍由 Android App 实现。
+
 草稿取消：DELETE /v1/registrations/{temp_id}。
 登记后的操作结束：DELETE /v1/sessions/current，正文 {"user_id":"..."}。
 结束时清空界面中的照片、姓名、联系人和 user_id。若验证已过期，直接清空即可。

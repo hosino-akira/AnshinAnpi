@@ -1,6 +1,6 @@
 # Node.js 用户端后端
 
-管理端已扩展到同一后端和 PostgreSQL：单管理员、邮箱和密码登录、登记者和联系人管理、邮件模板、同意文面版本及审计查询。初始化账号、启动和接入见 [管理端接口与操作说明](docs/ADMIN_API.md)。
+管理端已扩展到同一后端和 PostgreSQL：单管理员、邮箱和密码登录、登记者和联系人管理、邮件模板、同意文面版本及内部审计记录。初始化账号、启动和接入见 [管理端接口与操作说明](docs/ADMIN_API.md)。
 
 使用 Node.js 22+、Fastify、PostgreSQL，实现开发规格书第 4～11 章的用户端接口。邮件使用 SMTP/Nodemailer 单宛先发送；AWS SDK v3 的 Rekognition 负责生体检测和脸部识别，KMS 负责持久化个人数据加密，Secrets Manager 管理生产环境密钥。
 
@@ -45,7 +45,7 @@ AWS 资源尚未配置时，普通数据与文面接口可以调用；需要识�
 
 发送接口返回 `202 queued`，前端轮询发送结果。`queued`/`sending` 不是成功；`accepted` 才表示服务商已接受。`unknown` 表示外部请求可能已成功，需要回调或工作人员核对，不能自动重发。
 
-初次登记验证、本人确认、服务端阈值、同意版本及联系人有效状态均在后端检查。当前图片流程不进行活体检测，返回 liveness_passed=false；可选活体旧接口另行保留。姓名、联系人姓名、邮箱和 Rekognition 引用使用认证加密保存；正式登记前的数据只进入加密的临时内存，最长 15 分钟，90 秒无操作失效。临时内存使用单独本地 AES 密钥，生产配置从 Secrets Manager 读取。
+初次登记验证、本人确认、服务端阈值、同意版本及联系人有效状态均在后端检查。当前图片流程不进行活体检测，返回 liveness_passed=false；可选活体旧接口另行保留。姓名、联系人姓名、邮箱和 Rekognition 引用使用认证加密保存；正式登记前的数据只进入加密的临时内存，最长 15 分钟，5 分钟无相关接口调用失效。用户人脸会话同样最长 15 分钟、空闲 5 分钟失效；屏幕触摸和本地输入不会刷新后端计时。临时内存使用单独本地 AES 密钥，生产配置从 Secrets Manager 读取。
 
 Rekognition 不导出原始特征向量；数据库 `face_templates.encrypted_template` 保存加密的 Collection/FaceId 引用，真正的特征由 AWS Collection 管理。原图不写入 PostgreSQL 或 S3。用户暂停或注销会将模板标记 revoked；邮件工作进程在现有 face_templates 表中读取待清理引用，清除 AWS 特征后标记 deleted。取消或失败的登记尝试立即清理云端引用，不再使用独立清理队列和租约。Collection 应专用于本应用。
 

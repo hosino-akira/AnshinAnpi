@@ -12,7 +12,7 @@ test('admin proxy preserves cookies, CSRF and idempotency without forwarding arb
   assert.equal(seen.url,'https://backend.example/v1/admin/profile');assert.equal(seen.options.headers.get('cookie'),'anshin_admin=example');
   assert.equal(seen.options.headers.get('x-csrf-token'),'csrf');assert.equal(seen.options.headers.get('origin'),'https://frontend.example');
   assert.match(result.headers.get('set-cookie'),/HttpOnly; Secure/);
-  assert.equal((await proxyAdmin(new Request('https://frontend.example/api/admin/mail/webhooks'),'https://backend.example')).status,404);
+  for (const path of ['/mail/webhooks','/audit-logs','/policies/safety']) assert.equal((await proxyAdmin(new Request(`https://frontend.example/api/admin${path}`),'https://backend.example')).status,404);
 });
 test('cross-site requests cannot mutate or read administrator data',async()=> {
   let calls=0;const fetchImpl=async()=>{calls++;return new Response('{}');};

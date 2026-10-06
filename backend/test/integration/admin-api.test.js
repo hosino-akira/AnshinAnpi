@@ -60,6 +60,9 @@ test('password-only login grants admin authority; anonymous requests and wrong p
   assert.equal(response.body.admin.password,undefined);
   assert.equal((await call('POST','/login',{email:address,password},{origin:'https://attacker.example'})).status,403);
   await freshUser();assert.equal(user.name,'試験 利用者');
+  assert.equal((await call('GET','/audit-logs')).status,404);
+  assert.equal((await call('POST','/policies/safety',{})).status,404);
+  const settings=await ok('GET','/settings');assert.deepEqual(settings.policies.map(x=>x.consent_type),['registration']);assert.ok(settings.history.every(x=>x.consent_type==='registration'));
 });
 test('mutations require CSRF and a live revision; contact corrections enqueue one notification',async()=> {
   assert.equal((await call('PUT',`/users/${user.id}`,userBody({}),{'x-csrf-token':''})).status,403);
@@ -86,12 +89,12 @@ test('templates persist and render through the real mail-message code',async()=>
   const content=mailMessage(config,{displayName:'本人',recipientName:'家族',occurredAt:new Date(),timezone:'Asia/Tokyo',type:'safety',template:saved.mail});
   assert.equal(content.subject,'安否 本人');assert.match(content.text,/家族/);
 });
-test('policies keep history, activate on the effective date, and accept witnessed reconsent',async()=> {
+test('only privacy text is managed; versions activate on date without requiring reconsent',async()=> {
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-  const body={policy_version:'admin-v2',title:'新文面',body:'新しい同意本文',effective_date:today,requires_reconsent:true};
+  const body={policy_version:'admin-v2',body:'新しい同意本文',effective_date:today};
   await ok('POST','/policies/registration',body);
   assert.equal((await call('POST','/policies/registration',body)).status,409);
-  const publicPolicy=(await app.inject('/v1/consent-policies?type=registration')).json();assert.equal(publicPolicy.policy_version,'admin-v2');
+  const publicPolicy=(await app.inject('/v1/consent-policies?type=registration')).json();assert.equal(publicPolicy.policy_version,'admin-v2');assert.equal(publicPolicy.requires_reconsent,false);assert.equal(publicPolicy.title,body.body);
   await ok('POST','/policies/registration',{...body,policy_version:'future-v3',effective_date:'2099-01-01'});
   assert.equal((await app.inject('/v1/consent-policies?type=registration')).json().policy_version,'admin-v2');
   assert.equal((await pool.query("SELECT count(*) AS n FROM app_meta.admin_settings WHERE setting_key LIKE 'policy.registration.%'")).rows[0].n,'3');
@@ -115,7 +118,7 @@ test('deleting the last recipient suspends recognition; deleting a user erases p
   assert.equal((await pool.query('SELECT status FROM users WHERE user_id=$1',[id])).rows[0].status,'deleted');
   assert.equal((await pool.query('SELECT encrypted_email_snapshot FROM mail_deliveries WHERE user_id=$1',[id])).rows[0].encrypted_email_snapshot,null);
   assert.equal((await ok('GET','/users')).users.some(x=>x.id===id),false);
-  assert.ok((await ok('GET','/audit-logs')).logs.some(x=>x.action==='admin.user.deleted' && x.reason==='deletion'));
+  assert.ok((await pool.query("SELECT 1 FROM audit_logs WHERE action='admin.user.deleted' AND reason='deletion'")).rowCount);
   const rows=(await pool.query('SELECT * FROM audit_logs ORDER BY log_id')).rows;let previous=null;
   for (const row of rows) {assert.deepEqual(row.entry_hmac,auditDigest(config,row,previous));previous=row.entry_hmac;}
 });
