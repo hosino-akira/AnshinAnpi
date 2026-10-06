@@ -1,90 +1,90 @@
-# 管理端：单管理员 + 邮箱和密码
+# 管理画面：単一の管理者とメールアドレス・パスワード認証
 
-管理端与用户端共用现有 Node.js 后端及 PostgreSQL 八张业务表。管理配置只有 `app_meta.administrator`（数据库约束保证仅一行）和 `app_meta.admin_settings` 两张辅助表，不增加角色管理、独立数据库或 Redis。
+管理画面と利用者端末は、既存の Node.js バックエンドと PostgreSQL の 8 つの業務テーブルを共用します。管理設定用の補助テーブルは `app_meta.administrator`（データベース制約により 1 行だけを許可）と `app_meta.admin_settings` の 2 つです。ロール管理、独立したデータベース、Redis は追加しません。
 
-## 已初始化的本地账号
+## 初期設定済みのローカルアカウント
 
-- 邮箱：`admin@anshin-anpi.jp`
-- 名称：`安心施設 管理者`
-- 初始随机密码在 Git 忽略的 `backend/.admin-setup.json` 中，初始化工具不向日志打印凭据。
-- 使用邮箱和密码登录；将密码存入密码管理器后删除初始化文件。按项目所有者的最新要求，不启用多因素认证，原 XLSX 式样书保持不变。
+- メールアドレス：`admin@anshin-anpi.jp`
+- 名前：`安心施設 管理者`
+- 初期のランダムなパスワードは Git の対象外の `backend/.admin-setup.json` に保存します。初期設定ツールは認証情報をログに出力しません。
+- メールアドレスとパスワードでログインします。パスワード管理ツールに保存した後、初期設定ファイルを削除してください。プロジェクト所有者の最新の指定により、多要素認証は使用しません。元の XLSX 仕様書は変更しません。
 
-新环境先应用数据库迁移，再运行 `npm run provision:admin`。已有账号不会被覆盖。丢失密码时，在有权访问服务器的本地终端运行 `npm run provision:admin -- --reset`；这会生成新的密码、撤销全部旧会话并记录审计。不提供公网找回接口。
+新しい環境ではデータベースのマイグレーションを適用してから `npm run provision:admin` を実行します。既存のアカウントは上書きしません。パスワードを紛失した場合は、サーバーへのアクセス権があるローカル端末で `npm run provision:admin -- --reset` を実行してください。新しいパスワードを生成し、すべての旧セッションを失効させ、監査記録に残します。インターネット経由のパスワード復旧 API は提供しません。
 
-## 启动与接入
+## 起動と接続
 
-在 `backend` 运行 `npm start`。本地管理前端在 `anshin-anpi-admin-source` 运行 `npm run dev`，然后打开 `/admin`。前端的 `ANSHIN_BACKEND_URL` 默认 `http://127.0.0.1:3002`，必须与实际 API 监听地址一致。现有根 `.env` 可继续使用；数据库升级使用 `scripts/database.ps1 -Action migrate`。
+`backend` で `npm start` を実行します。ローカルの管理画面は `anshin-anpi-admin-source` で `npm run dev` を実行してから `/admin` を開きます。フロントエンドの `ANSHIN_BACKEND_URL` の既定値は `http://127.0.0.1:3002` で、実際の API の待受アドレスと一致させる必要があります。既存のルートの `.env` は引き続き使用できます。データベースの更新には `scripts/database.ps1 -Action migrate` を使用します。
 
-浏览器访问同源 `/api/admin/*`，代理至后端 `/v1/admin/*`。开发代理只允许本机地址；后端 `CORS_ORIGINS` 必须包含实际前端 Origin（含端口）。已构建的 Cloudflare Worker 支持环境绑定 `ANSHIN_BACKEND_URL`；线上需要可访问的 HTTPS 后端地址，并把站点 Origin 加入后端 `CORS_ORIGINS`。当前临时站点尚未发布这些更改，也没有替它配置线上后端。
+ブラウザは同一オリジンの `/api/admin/*` にアクセスし、プロキシがバックエンドの `/v1/admin/*` に転送します。開発用プロキシはローカルアドレスだけを許可します。バックエンドの `CORS_ORIGINS` には実際のフロントエンドの Origin（ポートを含む）を指定してください。ビルド済みの Cloudflare Worker は環境バインディング `ANSHIN_BACKEND_URL` に対応します。本番環境ではアクセス可能な HTTPS のバックエンドアドレスを指定し、サイトの Origin をバックエンドの `CORS_ORIGINS` に追加します。現在の仮公開サイトにはこれらの変更をまだ公開しておらず、本番用バックエンドも設定していません。
 
-会话仅在单后端进程内加密保存，重启后重新登录。Cookie 为 HttpOnly、SameSite=Strict，生产模式加 Secure；15 分钟无操作失效，最长 8 小时。密码使用随机盐 scrypt。连续 5 次登录失败锁定 5 分钟，锁定状态保存在数据库，重启不清除。管理请求不进入本地原始请求日志。
+セッションは単一のバックエンドプロセス内に暗号化して保存し、再起動後は再ログインが必要です。Cookie は HttpOnly、SameSite=Strict とし、本番モードでは Secure も付けます。無操作 15 分で失効し、全体の有効期限は最長 8 時間です。パスワードにはランダムなソルト付き scrypt を使用します。ログインに連続 5 回失敗すると 5 分間ロックします。ロック状態はデータベースに保存するため、再起動しても解除されません。管理要求はローカルの生の要求ログに記録しません。
 
 ## API
 
-`POST /login` 请求 `{email,password}`，响应 `{admin,csrf_token}` 并设置 Cookie。`GET /session` 可在刷新页面后取得会话及 CSRF 令牌。以下路径均以 `/v1/admin` 开头，除登录外全部要求管理员 Cookie；除登录外所有写操作还要求 `X-CSRF-Token` 和 `Idempotency-Key`。前端同源路径 `/api/admin` 与后端 `/v1/admin` 一一对应。目前本地地址为前端 `http://127.0.0.1:5173`、后端 `http://127.0.0.1:3002`。
+`POST /login` の要求は `{email,password}`、応答は `{admin,csrf_token}` で、Cookie を設定します。`GET /session` ではページの再読み込み後にセッションと CSRF トークンを取得できます。以下のパスはすべて `/v1/admin` で始まります。ログイン以外は管理者 Cookie が必須です。ログイン以外の書き込み操作には `X-CSRF-Token` と `Idempotency-Key` も必要です。フロントエンドの同一オリジンのパス `/api/admin` は、バックエンドの `/v1/admin` に一対一で対応します。現在のローカルアドレスはフロントエンドが `http://127.0.0.1:5173`、バックエンドが `http://127.0.0.1:3002` です。
 
-| 接口 | 用途 |
+| API | 用途 |
 |---|---|
-| POST `/login` | 邮箱及密码登录，创建会话 |
-| GET `/session` | 读取管理员信息及 CSRF 令牌 |
-| POST `/logout` | 撤销会话并清 Cookie |
-| PUT `/profile` | 修改名称、邮箱或密码；再次校验当前密码，保存后所有会话失效 |
-| GET `/dashboard` | 真实登记数、联系人数量、东京时区当日统计、邮件错误和近期操作 |
-| GET `/users?limit=200&offset=0` | 分页读取登记者及联系人；不返回照片或脸部特征 |
-| POST `/users/search` | 姓名完全一致搜索，必须记录用途 reason |
-| PUT `/users/{id}` | 修改姓名、联系人、停用；确认本人身份并检查数据版本 |
-| DELETE `/users/{id}` | 记录单管理员删除申请、停用、擦除姓名/邮箱与投递快照；保留审计证据 |
-| DELETE `/users/{id}/recipients/{recipientId}` | 删除联系人；最后一个有效联系人删除后自动停用用户 |
-| POST `/users/{id}/face` | 已停用用户在本人立会并同意后重新登记，恢复使用 |
-| POST `/users/{id}/consent` | 本人在场确认最新登记文面，记录新的同意履历 |
-| GET `/settings` | 当前邮件模板、利用者个人信息文面及历史版本 |
-| PUT `/mail-template` | 保存安否邮件标题、正文；现有发送工作进程实时读取 |
-| POST `/policies/registration` | 保存新版本和适用日期，不覆盖旧版本；按东京日期自动生效 |
+| POST `/login` | メールアドレスとパスワードによるログイン、セッション作成 |
+| GET `/session` | 管理者情報と CSRF トークンの取得 |
+| POST `/logout` | セッションの失効と Cookie の消去 |
+| PUT `/profile` | 名前、メールアドレス、パスワードの変更。現在のパスワードを再確認し、保存後にすべてのセッションを失効させる |
+| GET `/dashboard` | 実際の登録者数、連絡先数、東京時間の当日統計、メールエラー、直近の操作 |
+| GET `/users?limit=200&offset=0` | 登録者と連絡先をページ単位で取得。写真や顔の特徴量は返さない |
+| POST `/users/search` | 氏名の完全一致検索。用途 reason の記録が必須 |
+| PUT `/users/{id}` | 氏名と連絡先の変更、利用停止。本人確認とデータの版の確認を行う |
+| DELETE `/users/{id}` | 単一の管理者による削除申請を記録し、利用停止、氏名・メールアドレス・配信スナップショットの消去を行う。監査証跡は保持する |
+| DELETE `/users/{id}/recipients/{recipientId}` | 連絡先の削除。最後の有効な連絡先を削除すると利用者を自動で利用停止にする |
+| POST `/users/{id}/face` | 利用停止中の利用者を本人立会いと同意の下で再登録し、利用を再開する |
+| POST `/users/{id}/consent` | 本人立会いで最新の登録文面を確認し、新しい同意履歴を記録する |
+| GET `/settings` | 現在のメールテンプレート、利用者向け個人情報取扱文面、過去の版 |
+| PUT `/mail-template` | 安否確認メールの件名と本文を保存する。既存の送信ワーカーが随時読み取る |
+| POST `/policies/registration` | 新しい版と適用日を保存し、旧版は上書きしない。東京の日付に基づき自動で適用する |
 
-字段和校验以在线 `GET /openapi.json` 为准，该接口从当前代码生成规格。记录用途仅允许 `support/correction/suspension/deletion/audit`，不会把姓名或任意备注加入审计。管理员操作及拒绝的已认证操作均进入现有 HMAC 审计链；管理页面不提供操作记录侧栏及查询接口。
+フィールドと検証規則は、現在のコードから仕様を生成するオンラインの `GET /openapi.json` を正とします。用途は `support/correction/suspension/deletion/audit` だけを許可し、氏名や自由記述の備考は監査記録に含めません。管理者の操作と、認証済みでも拒否された操作は既存の HMAC 監査チェーンに記録します。管理画面には操作記録のサイドバーや検索 API は設けません。
 
-### 请求参数与响应
+### 要求パラメーターと応答
 
-请求正文为 JSON。除下表明确标为可选的字段，列出的字段均必填；路径中的 `id` 和 `recipientId` 为 UUID。`expected_revision` 必须原样使用读取该记录时得到的 `revision`。
+要求本文は JSON です。下表で任意と明記した項目以外は必須です。パスの `id` と `recipientId` は UUID です。`expected_revision` には対象の記録を取得した際の `revision` をそのまま指定してください。
 
-| 方法及路径 | 参数 | 主要响应 |
+| メソッドとパス | パラメーター | 主な応答 |
 |---|---|---|
-| POST `/login` | `email`, `password` | `admin`, `csrf_token`；设置 `anshin_admin` Cookie |
-| GET `/session` | 无 | `admin`, `csrf_token` |
-| POST `/logout` | `{}` | `logged_out: true`；清除 Cookie |
-| PUT `/profile` | `name`, `email`, `current_password`；可选 `new_password`（12～128 字符） | `admin`, `reauthenticate: true`，全部旧会话失效 |
-| GET `/dashboard` | 无 | `counts`, `errors`, `activities` |
-| GET `/users` | 可选查询 `limit`（1～200，默认 100）, `offset`（0～100000，默认 0） | `users`, `total`, `offset`, `limit` |
-| POST `/users/search` | `name`, `reason`；按完整姓名查询 | `users`, `total`, `offset`, `limit` |
-| PUT `/users/{id}` | `name`, `status`, `recipients`, `expected_revision`, `identity_confirmed: true`, `reason`；可选 `reset_face`（默认 false） | `user`, `notification_check_id` |
+| POST `/login` | `email`, `password` | `admin`, `csrf_token`。`anshin_admin` Cookie を設定 |
+| GET `/session` | なし | `admin`, `csrf_token` |
+| POST `/logout` | `{}` | `logged_out: true`。Cookie を消去 |
+| PUT `/profile` | `name`, `email`, `current_password`。任意：`new_password`（12～128 文字） | `admin`, `reauthenticate: true`。すべての旧セッションを失効 |
+| GET `/dashboard` | なし | `counts`, `errors`, `activities` |
+| GET `/users` | 任意のクエリ：`limit`（1～200、既定値 100）, `offset`（0～100000、既定値 0） | `users`, `total`, `offset`, `limit` |
+| POST `/users/search` | `name`, `reason`。氏名全体で検索 | `users`, `total`, `offset`, `limit` |
+| PUT `/users/{id}` | `name`, `status`, `recipients`, `expected_revision`, `identity_confirmed: true`, `reason`。任意：`reset_face`（既定値 false） | `user`, `notification_check_id` |
 | DELETE `/users/{id}` | `expected_revision`, `reason: "deletion"` | `deleted: true` |
 | DELETE `/users/{id}/recipients/{recipientId}` | `expected_revision`, `reason: "deletion"` | `user` |
 | POST `/users/{id}/face` | `image_base64`, `expected_revision`, `owner_present: true`, `consent_granted: true`, `policy_version` | `user`, `liveness_passed: false` |
 | POST `/users/{id}/consent` | `expected_revision`, `owner_present: true`, `consent_granted: true`, `policy_version` | `user` |
-| GET `/settings` | 无 | `mail`, `policies`, `history` |
+| GET `/settings` | なし | `mail`, `policies`, `history` |
 | PUT `/mail-template` | `subject`, `body`, `expected_revision` | `saved: true` |
 | POST `/policies/registration` | `policy_version`, `body`, `effective_date`（YYYY-MM-DD） | `published: true`, `effective_date` |
 
-登记者 `status` 允许 `active/suspended/pending_registration`。`recipients` 为 1～2 项 `{name,email,id?}`，保留原联系人时需带 `id`；新增联系人不带 `id`。姓名最长 50 字符，联系人邮箱不得重复。`reset_face: true` 会将用户停用，恢复时必须走脸部重新登记接口。
+登録者の `status` は `active/suspended/pending_registration` を許可します。`recipients` は 1～2 件の `{name,email,id?}` です。既存の連絡先を保持する場合は `id` を付け、新規の連絡先には付けません。氏名は最大 50 文字で、連絡先のメールアドレスは重複できません。`reset_face: true` は利用者を利用停止にし、再開には顔の再登録 API が必要です。
 
-管理员档案只返回 `name/email/last_login_at/last_login_ip`，不返回密码。每个登记者返回 `id/name/status/faceStatus/registeredAt/updatedAt/revision/lastCheckAt/consentVersion/recipients`，不返回原照片或脸部特征。
+管理者プロフィールは `name/email/last_login_at/last_login_ip` だけを返し、パスワードは返しません。各登録者は `id/name/status/faceStatus/registeredAt/updatedAt/revision/lastCheckAt/consentVersion/recipients` を返し、元の写真や顔の特徴量は返しません。
 
-失败响应为 `{error:{code,message,request_id}}`，校验错误可能另有 `details`。常用状态：400 输入无效、401 密码错误或会话失效、403 来源或 CSRF 校验失败、404 记录不存在、409 版本冲突、429 暂时限制、503 服务无法使用。登录页将缺失接口、无法连接、账号未初始化统一显示连接失败；密码错误显示邮箱或密码错误，限制和超时也有明确提示。错误区域使用与其他错误相同的红色样式，并自动获得焦点；登录期间禁用提交按钮。
+失敗時の応答は `{error:{code,message,request_id}}` です。検証エラーでは `details` を追加する場合があります。主なステータスは、400：入力が無効、401：パスワード不一致またはセッション失効、403：送信元または CSRF の検証失敗、404：記録なし、409：版の競合、429：一時的な制限、503：サービス利用不可です。ログイン画面では、API の未実装、接続不可、アカウント未設定を接続失敗として表示します。パスワード不一致はメールアドレスまたはパスワードの誤りとして表示し、制限やタイムアウトにも明確な案内を表示します。エラー領域はほかのエラーと同じ赤色のスタイルで表示し、自動でフォーカスします。ログイン処理中は送信ボタンを無効にします。
 
-若登录返回 `Route POST:/v1/admin/login not found`，说明前端已连接到后端，但后端仍是未加载管理员接口的旧进程。更新代码后需重启后端；可通过 `/openapi.json` 检查 `/v1/admin/login` 的 POST 接口是否存在。
+ログインで `Route POST:/v1/admin/login not found` が返る場合、フロントエンドはバックエンドに接続できていますが、バックエンドは管理者 API を読み込んでいない旧プロセスです。コード更新後にバックエンドを再起動してください。`/openapi.json` で `/v1/admin/login` の POST API の存在を確認できます。
 
-## 数据联动
+## データの連携
 
-- 修改使用中登记者的联系人邮箱或添加联系人时，变更和确认邮件入队在同一个数据库事务完成。SMTP 未配置会拒绝该修改，不伪装成已通知。暂停或未完成登记的用户不会因修改联系人而发送通知。
-- 联系人变更取消旧宛先待发邮件，清除历史邮箱快照，避免按过期资料发送。通知使用现有 `safety_checks` / `mail_deliveries`，增加 `contact_change` 类型，没有第二套队列。
-- 使用停止、删除或请求脸部重登会即时撤销识别资格，取消待发邮件。暂停后恢复使用需要本人立会重新登记脸部；不恢复已经撤销的云端特征。
-- 脸部重登沿用现有照片识别模式，检查图片质量和重复登记；不会声称通过活体检测。照片只在请求内存中处理，不保存原图；管理端使用通用头像。
-- 删除时马上清除业务姓名、邮箱及投递快照。AWS 特征由现有清理工作进程删除，30 天到期且外部特征清理成功后才物理删除用户行。必须保持邮件工作进程启用；若外部清理失败，保留清理引用供重试。
-- 同意文面发布必须使用新版本号，不允许过去日期。该管理页面只编辑利用者的个人信息文面，不提供文面类型、标题或强制再同意选项；新文面不强制已有用户重新同意。历史版本由设置接口保留，用户端在适用日前仍取得原版本。
-- 并发修改使用数据库行锁和完整时间戳 `revision`，旧页面保存返回 `409 ADMIN_REVISION_CHANGED`。管理操作的成功响应加密缓存 15 分钟；重启后版本检查及邮件唯一约束阻止重复变更通知。
+- 利用中の登録者の連絡先メールアドレスを変更、または連絡先を追加する場合、変更と確認メールのキューへの追加を同一のデータベーストランザクションで行います。SMTP が未設定の場合は変更を拒否し、通知済みとは扱いません。利用停止中または登録未完了の利用者は、連絡先の変更によって通知を送信しません。
+- 連絡先の変更時には旧宛先の送信待ちメールを取り消し、過去のメールアドレスのスナップショットを消去して、古い情報による送信を防ぎます。通知には既存の `safety_checks` / `mail_deliveries` を使用し、`contact_change` 種別を追加します。別のキューは作成しません。
+- 利用停止、削除、顔の再登録要求は、認証資格を直ちに失効させ、送信待ちメールを取り消します。利用停止後の再開には本人立会いで顔の再登録が必要です。失効済みのクラウド上の特徴量は復元しません。
+- 顔の再登録では既存の写真による認証方式を使用し、画像品質と重複登録を確認します。生体検知に成功したとは扱いません。写真は要求の処理中のメモリ内だけで扱い、元の画像は保存しません。管理画面には共通の人物アイコンを使用します。
+- 削除時は業務上の氏名、メールアドレス、配信スナップショットを直ちに消去します。AWS の特徴量は既存の削除ワーカーが削除します。30 日間が経過し、外部の特徴量の削除が成功した後に利用者の行を物理削除します。メールワーカーを有効にしておく必要があります。外部データの削除に失敗した場合は、再試行用の参照情報を保持します。
+- 同意文面の公開には新しい版番号を使用し、過去の日付は許可しません。この管理画面で編集するのは利用者向けの個人情報取扱文面だけです。文面の種別、タイトル、再同意の強制の選択肢は設けません。新しい文面は既存の利用者に再同意を強制しません。設定 API で過去の版を保持し、利用者端末には適用日まで旧版を返します。
+- 同時更新にはデータベースの行ロックと完全なタイムスタンプの `revision` を使用します。古い画面からの保存は `409 ADMIN_REVISION_CHANGED` を返します。管理操作の成功応答は暗号化して 15 分間キャッシュします。再起動後も版の確認とメールの一意制約により、変更通知の重複を防ぎます。
 
-## 联调检查
+## 連携の確認
 
-前端可执行 `npm run lint` 和 `npm run build` 检查代码及构建；在本地 `/admin` 检查登录、资料读取、设置保存和退出。后端 `GET /health/ready` 检查数据库连接，`GET /openapi.json` 查看当前接口定义。用户端接口与机器人联调见 [Android 对接文档](FRONTEND_FACE_HANDOFF.md)。
+フロントエンドは `npm run lint` と `npm run build` でコードとビルドを確認できます。ローカルの `/admin` でログイン、情報の取得、設定の保存、ログアウトを確認します。バックエンドの `GET /health/ready` でデータベース接続、`GET /openapi.json` で現在の API 定義を確認します。利用者 API とロボットの連携については [Android 連携文書](FRONTEND_FACE_HANDOFF.md) を参照してください。
 
-个人信息文面已按项目所有者提供的六段文字保存为 `privacy-v1`，2026-10-06 生效。旧版及既有同意记录保持不变。标题由正文首行取得，保存接口只接受正文、版号和适用日期；安否邮件发送同意文面不通过该管理页编辑。
+個人情報取扱文面は、プロジェクト所有者が提供した 6 段落の文章を `privacy-v1` として保存し、2026-10-06 から適用します。旧版と既存の同意記録は保持します。タイトルは本文の先頭行から取得します。保存 API は本文、版番号、適用日だけを受け付けます。安否確認メールの送信同意文面は、この管理画面では編集しません。

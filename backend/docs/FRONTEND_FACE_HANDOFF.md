@@ -1,45 +1,45 @@
-# Android 用户端接口对接（简化版）
+# Android 利用者端末の API 連携（簡略版）
 
-版本：0.4.0。后端地址：`http://192.168.0.51:3002`，IP 变化时同步更新。
+版：0.4.0。バックエンドのアドレス：`http://192.168.0.51:3002`。IP アドレスが変わった場合は接続先も更新してください。
 
-## 请求约定
+## 要求の規約
 
-所有客户端按同一个机器人处理，不传终端 ID、终端凭据或 Authorization，不返回 user_token。
-注册和识别返回 user_id，后续直接使用该 ID。人脸识别、本人确认、同意步骤仍按下面顺序执行，后端保留验证有效期与防重复发送检查。
+すべてのクライアントを同一のロボットとして扱います。端末 ID、端末の認証情報、Authorization は送信せず、user_token も返しません。
+登録と顔認証で返された user_id を後続の処理で直接使用します。顔認証、本人確認、同意の各手順は以下の順序で実行します。バックエンドでは認証の有効期限と重複送信の防止を確認します。
 
-POST / DELETE 使用 Content-Type: application/json 和 Idempotency-Key: <本次操作的 UUID>。
-同一次请求的网络重试必须复用同一个编号和相同正文；新的操作使用新编号。
-照片使用 JPEG/PNG 纯 Base64，不带 data URL 前缀，解码后最多 512 KiB。
+POST / DELETE には Content-Type: application/json と Idempotency-Key: <今回の操作の UUID> を使用します。
+同じ要求を通信エラーで再試行する場合は、同じ ID と同じ本文を再使用してください。新しい操作には新しい ID を使用します。
+写真は JPEG/PNG の Base64 データのみとし、data URL の接頭辞を付けません。デコード後の上限は 512 KiB です。
 
-## 注册顺序
+## 登録の順序
 
-仅注册成功的 `active` 用户视为已登记。注册①发现与现有 `active` 用户高度匹配时返回 HTTP 409、`error.code=FACE_ALREADY_REGISTERED`，不返回 `temp_id`。注册③会再次检查已完成登记，不因姓名不同而允许重复登记。`pending_registration`、仅拍照或中途放弃的记录不阻止重新登记，也不会被安否识别匹配；二次登记验证仅匹配本次登记的 `user_id`，不会受其他未完成记录干扰。登记验证通过且通知全部被邮件服务器受理后，状态才变为 `active`。前端遇到 `FACE_ALREADY_REGISTERED` 时提示“已登记，请选择登记済み流程”。该响应不透露已有用户的姓名和 ID。
+登録が完了した `active` の利用者だけを登録済みと扱います。登録①で既存の `active` の利用者と高い類似度で一致した場合は HTTP 409、`error.code=FACE_ALREADY_REGISTERED` を返し、`temp_id` は返しません。登録③でも登録済みか再確認し、氏名が異なっていても重複登録は許可しません。`pending_registration`、写真撮影だけの記録、途中で中止した記録は再登録を妨げず、安否確認の顔認証にも使用しません。2 回目の登録確認では今回の `user_id` だけを照合するため、ほかの未完了の記録の影響は受けません。登録確認が成功し、すべての通知がメールサーバーに受理されてから状態が `active` になります。フロントエンドで `FACE_ALREADY_REGISTERED` を受け取った場合は「登録済みです。「登録済み」の手順を選択してください」と案内します。この応答に既存の利用者の氏名や ID は含めません。
 
-| 步骤 | 请求 | 响应及页面处理 |
+| 手順 | 要求 | 応答と画面の処理 |
 | --- | --- | --- |
-| ① 第一次采集 | POST /v1/registrations/capture；image_base64 | face_valid、temp_id、expires_at；通过后继续填写资料 |
-| ② 获取同意文案 | GET /v1/consent-policies?type=registration | title、body、policy_version |
-| ③ 确定登记 | POST /v1/registrations；temp_id、display_name、recipients、consent_result、policy_version | success、user_id、user_status=pending_registration；保存 user_id |
-| ④ 第二次验证并自动发通知 | POST /v1/registrations/verify；user_id、image_base64 | matched、similarity_score、metrics、verification_status；匹配并提交成功时还有 check_id、send_requested=true |
+| ① 初回撮影 | POST /v1/registrations/capture；image_base64 | face_valid、temp_id、expires_at；確認後に情報の入力へ進む |
+| ② 同意文面の取得 | GET /v1/consent-policies?type=registration | title、body、policy_version |
+| ③ 登録の確定 | POST /v1/registrations；temp_id、display_name、recipients、consent_result、policy_version | success、user_id、user_status=pending_registration；user_id を保存する |
+| ④ 再撮影による確認と通知の自動送信 | POST /v1/registrations/verify；user_id、image_base64 | matched、similarity_score、metrics、verification_status；照合と送信要求の受付が成功した場合は check_id、send_requested=true も返す |
 
-recipients 为 1～2 个联系人：[{"name":"家族","email":"family@example.com"}]。
-consent_result 为 granted / denied；拒绝同意不会创建用户。
-第二次照片只与本次 user_id 对应的人脸比较。matched=false 时重拍，不发邮件。
-匹配并返回 send_requested=true 后，用户端显示通知提交成功并结束操作，**删除原注册⑤的邮件轮询步骤**。
-后台按邮件处理结果更新登记状态，用户端不等待或展示实际结果。
+recipients は 1～2 件の連絡先です：[{"name":"家族","email":"family@example.com"}]。
+consent_result は granted / denied です。同意を拒否した場合は利用者を作成しません。
+2 回目の写真は今回の user_id に対応する顔だけと比較します。matched=false の場合は撮り直し、メールを送信しません。
+照合に成功して send_requested=true が返されたら、利用者画面に通知の送信要求の受付成功を表示し、操作を終了します。**従来の登録⑤のメール結果のポーリング手順は削除します。**
+バックグラウンドでメールの処理結果に応じて登録状態を更新します。利用者画面では実際の結果を待機・表示しません。
 
-## 安否顺序
+## 安否確認の順序
 
-| 步骤 | 请求 | 响应及页面处理 |
+| 手順 | 要求 | 応答と画面の処理 |
 | --- | --- | --- |
-| ① 识别人脸 | POST /v1/faces/identify；image_base64 | matched；成功时 display_name、user_id、metrics；未匹配不返回姓名或用户 ID |
-| ② 确认本人并获取联系人 | POST /v1/users/{user_id}/recipients；confirmed=true | 联系人 name、masked_email，同时 consent_body、policy_version |
-| ③ 同意并发送 | POST /v1/safety-notifications；user_id、consent=true、policy_version | 202：success=true、send_requested=true、check_id、user_id；显示发送成功并结束 |
+| ① 顔認証 | POST /v1/faces/identify；image_base64 | matched；成功時は display_name、user_id、metrics；不一致の場合は氏名や利用者 ID を返さない |
+| ② 本人確認と連絡先の取得 | POST /v1/users/{user_id}/recipients；confirmed=true | 連絡先の name、masked_email と consent_body、policy_version |
+| ③ 同意と送信 | POST /v1/safety-notifications；user_id、consent=true、policy_version | 202：success=true、send_requested=true、check_id、user_id；送信成功を表示して終了する |
 
-confirmed=false 表示不是本人，不返回联系人、不发送邮件。
-consent=false 表示不同意发送，返回 send_requested=false、check_id=null，不创建邮件请求。
+confirmed=false は本人ではないことを示し、連絡先を返さず、メールも送信しません。
+consent=false は送信に同意しないことを示します。send_requested=false、check_id=null を返し、メールの送信要求を作成しません。
 
-发送示例：
+送信例：
 
 ```http
 POST /v1/safety-notifications HTTP/1.1
@@ -54,24 +54,24 @@ Idempotency-Key: 11111111-1111-4111-8111-111111111111
 {"success":true,"send_requested":true,"check_id":"33333333-3333-4333-8333-333333333333","user_id":"22222222-2222-4222-8222-222222222222"}
 ```
 
-## 用户端邮件展示
+## 利用者画面のメール表示
 
-后端接受发送请求后，用户端统一显示“发送成功”，不查询或展示排队、发送失败、部分失败、送达、退信等状态，也不提供邮件重试按钮。
-这里的成功表示**发送请求已提交给后端**，不是客户已收到邮件的保证。异步发送失败不改变用户端完成页。
-接口未接受请求或网络中断时，不伪造发送记录；用户端可以结束操作，不展示具体邮件失败原因，开发日志用于排查。
-实际邮件是否被服务商接受、投递或退信，继续保存在后端，之后单独与管理端联动。
-/v1/mail-results 与 retry 暂留作后端诊断，Android 用户端不调用。
+バックエンドが送信要求を受け付けたら、利用者画面では一律に「送信成功」と表示します。待機中、送信失敗、一部失敗、配信済み、返送などの状態を問い合わせ・表示せず、メールの再試行ボタンも設けません。
+ここでの成功は **バックエンドが送信要求を受け付けたこと** を意味し、宛先がメールを受信したことを保証するものではありません。非同期の送信失敗によって利用者画面の完了表示は変わりません。
+要求が受け付けられなかった場合や通信が中断した場合は、送信記録を作成しません。利用者画面では操作を終了でき、メールの具体的な失敗理由は表示しません。調査には開発ログを使用します。
+サービス事業者による受付、配信、返送の実際の結果は引き続きバックエンドに保存し、管理画面とは今後別途連携します。
+/v1/mail-results と retry はバックエンドの診断用に残しており、Android 利用者端末からは呼び出しません。
 
-## 结束操作
+## 操作の終了
 
-后端登记草稿和人脸会话连续 5 分钟没有相关接口调用时失效，总有效期最长 15 分钟。相关有效请求刷新空闲计时，但不延长总有效期；屏幕触摸、本地输入或仅获取同意文案不会刷新后端计时。`/v1/terminal` 和首次采集响应中的 `idle_timeout_seconds` 为 300。草稿过期返回 `TIME-001`，人脸会话过期返回 `FACE_VERIFICATION_REQUIRED`；App 应清空本次操作信息并引导重新开始。界面弹框、倒计时及返回首页仍由 Android App 实现。
+バックエンドの登録途中の情報と顔認証セッションは、関連する API 呼び出しが連続 5 分間ない場合に失効し、全体の有効期限も最長 15 分です。関連する有効な要求は無操作時間を更新しますが、全体の有効期限は延長しません。画面へのタッチ、端末内の入力、同意文面の取得だけではバックエンドのタイマーを更新しません。`/v1/terminal` と初回撮影の応答に含まれる `idle_timeout_seconds` は 300 です。登録途中の情報の期限切れは `TIME-001`、顔認証セッションの期限切れは `FACE_VERIFICATION_REQUIRED` を返します。App は今回の操作情報を消去し、やり直しを案内してください。画面のダイアログ、カウントダウン、ホームへの復帰は Android App で実装します。
 
-草稿取消：DELETE /v1/registrations/{temp_id}。
-登记后的操作结束：DELETE /v1/sessions/current，正文 {"user_id":"..."}。
-结束时清空界面中的照片、姓名、联系人和 user_id。若验证已过期，直接清空即可。
-本机网页自测可走 /api/terminal/...；Android 直接调用后端 /v1/...。
+仮登録の取消：DELETE /v1/registrations/{temp_id}。
+登録後の操作の終了：DELETE /v1/sessions/current、本文 {"user_id":"..."}。
+終了時には画面の写真、氏名、連絡先、user_id を消去します。認証の有効期限が切れている場合は、画面の情報を消去するだけで構いません。
+ローカルのブラウザによる動作確認では /api/terminal/... を使用できます。Android はバックエンドの /v1/... を直接呼び出します。
 
-## 调用示例
+## 呼び出し例
 
 ```ts
 const api = createFaceClient();

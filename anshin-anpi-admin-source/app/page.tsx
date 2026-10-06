@@ -650,7 +650,7 @@ export default function Home() {
     useState<{ policy_version: string; body: string }>();
   const [faceError, setFaceError] = useState("");
   const [faceMessage, setFaceMessage] =
-    useState("正在连接人脸接口…");
+    useState("顔認証 API に接続しています…");
   const [faceMetrics, setFaceMetrics] =
     useState<Partial<FaceMetrics>>();
   const [verifiedName, setVerifiedName] = useState("");
@@ -677,18 +677,18 @@ export default function Home() {
       .then(([terminal, policy]) => {
         if (!active) return;
         if (!terminal.capabilities.face)
-          throw new Error("人脸服务未配置");
+          throw new Error("顔認証サービスが設定されていません");
         setFaceReady(true);
         setRegistrationPolicy(policy);
         setFaceMessage(
-          "真实人脸接口已连接；图片模式不检测活体。",
+          "顔認証 API に接続しました。画像モードでは生体検知を行いません。",
         );
       })
       .catch(() => {
         if (active) {
           setFaceReady(false);
           setFaceError(
-            "人脸接口未连接，请确认前端代理和本地后端已启动。",
+            "顔認証 API に接続できません。フロントエンドのプロキシとローカルのバックエンドが起動しているか確認してください。",
           );
         }
       });
@@ -742,7 +742,7 @@ export default function Home() {
     setFaceError("");
     setFaceMetrics(undefined);
     setVerifiedName("");
-    setFaceMessage("本次操作已结束。");
+    setFaceMessage("今回の操作は終了しました。");
     setName("");
     setRecipients([
       { name: "", email: "" },
@@ -769,7 +769,7 @@ export default function Home() {
   ) => {
     if (apiBusy.current) return;
     if (!faceReady) {
-      setFaceError("人脸接口未连接。");
+      setFaceError("顔認証 API に接続されていません。");
       return;
     }
     apiBusy.current = true;
@@ -787,21 +787,21 @@ export default function Home() {
       if (label === "安否通知を受け付けています") { goHome(); return; }
       if (cause instanceof FaceApiError) {
         const messages: Record<string, string> = {
-          "FACE-001": "照片中没有检测到人脸。",
-          "FACE-002": "请确保照片中只有一人。",
+          "FACE-001": "写真から顔が検出されませんでした。",
+          "FACE-002": "写真には一人だけが写るようにしてください。",
           FACE_QUALITY_FAILED:
-            "照片质量未通过，请调整光线、清晰度和脸部角度。",
+            "写真の品質基準を満たしていません。明るさ、鮮明さ、顔の角度を調整してください。",
           FACE_VERIFICATION_REQUIRED:
-            "验证会话已过期，请返回首页重新开始。",
-          FACE_AUTH_EXPIRED: "本机 AWS 登录已过期。",
-          FACE_ACCESS_DENIED: "AWS 权限不足。",
+            "認証セッションの有効期限が切れました。ホーム画面に戻ってやり直してください。",
+          FACE_AUTH_EXPIRED: "この端末の AWS ログインの有効期限が切れました。",
+          FACE_ACCESS_DENIED: "AWS の権限が不足しています。",
           POLICY_VERSION_CHANGED:
-            "同意文案已更新，请返回首页后刷新页面。",
+            "同意文面が更新されました。ホーム画面に戻ってページを再読み込みしてください。",
         };
         setFaceError(
           cause.status === 429
-            ? `操作受限，请${cause.retryAfterSeconds ? `等待 ${cause.retryAfterSeconds} 秒后` : "稍后"}重试。`
-            : `${messages[cause.code] ?? "人脸接口操作未完成。"}（${cause.code}）` +
+            ? `操作が制限されています。${cause.retryAfterSeconds ? `${cause.retryAfterSeconds} 秒後に` : "しばらくしてから"}再試行してください。`
+            : `${messages[cause.code] ?? "顔認証 API の処理が完了しませんでした。"}（${cause.code}）` +
                 (typeof cause.details?.aws_error ===
                 "string"
                   ? ` ${cause.details.aws_error}`
@@ -814,7 +814,7 @@ export default function Home() {
         setFaceError(
           cause instanceof Error
             ? cause.message
-            : "人脸处理失败。",
+            : "顔認証の処理に失敗しました。",
         );
     } finally {
       apiBusy.current = false;
@@ -845,7 +845,7 @@ export default function Home() {
         }
         setFaceMetrics(draft.metrics);
         setFaceMessage(
-          "照片已通过检查并暂存，请填写登记资料。",
+          "写真の確認が完了し、一時保存しました。登録情報を入力してください。",
         );
         setScreen("SCR-03");
       },
@@ -863,7 +863,7 @@ export default function Home() {
           !contactsValid
         )
           throw new Error(
-            "请完成拍照、姓名、联系人和登记同意。",
+            "写真撮影、氏名と連絡先の入力、登録への同意を完了してください。",
           );
         const completed = await faceClient.register({
           temp_id: faceDraft.current,
@@ -875,7 +875,7 @@ export default function Home() {
         if (
           !completed.user_id
         )
-          throw new Error("登记未完成。");
+          throw new Error("登録が完了しませんでした。");
         faceDraft.current = undefined;
         faceSession.current = {
           user_id: completed.user_id,
@@ -891,7 +891,7 @@ export default function Home() {
           throw cause;
         }
         setFaceMessage(
-          "资料已保存，请再次拍照。比对通过后将自动发送登记通知。",
+          "情報を保存しました。もう一度写真を撮影してください。照合が成功すると登録通知を自動送信します。",
         );
         setScreen("SCR-07");
       },
@@ -905,7 +905,7 @@ export default function Home() {
       "写真を照合しています",
       async (checkActive) => {
         if (registration && !faceSession.current?.user_id)
-          throw new Error("请先完成登记。");
+          throw new Error("先に登録を完了してください。");
         const result = registration
           ? await faceClient.verifyAndNotify(
               photo,
@@ -931,8 +931,8 @@ export default function Home() {
         if (result.result !== "matched") {
           setFaceError(
             result.result === "ambiguous"
-              ? "候选人脸相近，无法确认本人。"
-              : "未匹配到用户。日常识别只匹配已激活用户。",
+              ? "顔が似ている候補が複数あるため、本人を確認できません。"
+              : "該当する利用者が見つかりませんでした。通常の顔認証は利用開始済みの利用者だけを対象とします。",
           );
           return;
         }
@@ -940,8 +940,8 @@ export default function Home() {
         setMailCheckId(result.check_id);
         setFaceMessage(
           registration
-            ? "比对通过，登记通知提交成功。"
-            : "人脸匹配成功，请确认本人。",
+            ? "照合に成功し、登録通知の送信要求を受け付けました。"
+            : "顔の照合に成功しました。ご本人か確認してください。",
         );
         setScreen(registration ? "SCR-09" : "SCR-11");
       },
@@ -953,7 +953,7 @@ export default function Home() {
       async (checkActive) => {
         const current = faceSession.current;
         if (!current?.user_id)
-          throw new Error("请重新识别本人。");
+          throw new Error("もう一度顔認証を行ってください。");
         const result = await faceClient.confirmRecipients(
           current.user_id,
           confirmed,
@@ -978,7 +978,7 @@ export default function Home() {
           !sendAgreed ||
           !safetyContacts?.policy_version
         )
-          throw new Error("请确认本人并同意发送。");
+          throw new Error("本人確認と送信への同意を行ってください。");
         const result = await faceClient.notifySafety(
           current.user_id,
           true,
@@ -986,7 +986,7 @@ export default function Home() {
         );
         checkActive();
         if (!result.check_id)
-          throw new Error("邮件请求未受理。");
+          throw new Error("メールの送信要求が受け付けられませんでした。");
         setMailCheckId(result.check_id);
         setScreen("SCR-14");
       },
@@ -1810,7 +1810,7 @@ export default function Home() {
       {/* 全画面共通：端末状態、手続き進捗、現在画面 */}
       <StatusHeader screen={screen} />
       <section
-        aria-label="真实人脸接口状态"
+        aria-label="顔認証 API の接続状態"
         style={{
           padding: "8px 24px",
           background: "#f1f5f9",
@@ -1824,40 +1824,40 @@ export default function Home() {
         )}
         {faceMetrics && (
           <p>
-            人脸相似度：
+            顔の類似度：
             {typeof faceMetrics.similarity_score ===
             "number"
               ? faceMetrics.similarity_score.toFixed(2)
-              : "无可用分数"}
+              : "スコアなし"}
             {typeof faceMetrics.match_threshold ===
               "number" &&
-              `；匹配门槛：${faceMetrics.match_threshold.toFixed(2)}`}
-            ；人脸检测置信度：
+              `；照合のしきい値：${faceMetrics.match_threshold.toFixed(2)}`}
+            ；顔検出の信頼度：
             {typeof faceMetrics.face_confidence === "number"
               ? faceMetrics.face_confidence.toFixed(2)
-              : "无可用分数"}
-            ；亮度：
+              : "スコアなし"}
+            ；明るさ：
             {typeof faceMetrics.brightness === "number"
               ? faceMetrics.brightness.toFixed(2)
-              : "无可用分数"}
-            ；清晰度：
+              : "スコアなし"}
+            ；鮮明さ：
             {typeof faceMetrics.sharpness === "number"
               ? faceMetrics.sharpness.toFixed(2)
-              : "无可用分数"}
-            。图片模式不检测活体。
+              : "スコアなし"}
+            。画像モードでは生体検知を行いません。
           </p>
         )}
       </section>
       {import.meta.env.DEV && (
         <nav
-          aria-label="真实接口测试"
+          aria-label="API 接続テスト"
           style={{
             padding: "8px 24px",
             textAlign: "right",
           }}
         >
           <a href="/dev/face">
-            真实人脸接口测试：图片登记 / 识别 / 评分
+            顔認証 API テスト：写真登録 / 顔認証 / 評価
           </a>
         </nav>
       )}

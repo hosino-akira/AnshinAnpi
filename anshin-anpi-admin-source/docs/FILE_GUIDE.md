@@ -8,8 +8,8 @@
 
 | 資料 | 内容 |
 |---|---|
-| [Android対接文書](../../backend/docs/FRONTEND_FACE_HANDOFF.md) | 登録・顔認識・本人確認・通知のAPI順序 |
-| [管理端API](../../backend/docs/ADMIN_API.md) | 管理者の初期設定、ログイン、利用者・文案管理 |
+| [Android連携文書](../../backend/docs/FRONTEND_FACE_HANDOFF.md) | 登録・顔認識・本人確認・通知のAPI順序 |
+| [管理画面API](../../backend/docs/ADMIN_API.md) | 管理者の初期設定、ログイン、利用者・文面管理 |
 | [データベース説明](../../database/README.md) | 業務テーブル、起動、初期化、保存期間 |
 | [開発仕様書](specs/安心安否確認システム_開発仕様書_v1.0_正式版.xlsx) | 原本の業務・データ仕様 |
 | [画面遷移仕様書](specs/安心安否確認システム_画面遷移仕様書_v1.0_正式版.xlsx) | 原本の画面遷移仕様 |
@@ -45,7 +45,7 @@ npm run lintは静的検査、npm run buildは本番ビルドです。ビルド�
 | build/admin-proxy.mjs | /api/admin/...の管理API転送 |
 | build/admin-proxy.d.mts | 管理API転送モジュールの型定義 |
 | public/favicon.svg | ブラウザのアイコン |
-| public/registered-user-faces.png | 保留している旧サンプル顔画像 |
+| public/registered-user-faces.png | 保持している旧サンプル顔画像 |
 
 ## 利用者画面とタイマー
 
@@ -53,13 +53,13 @@ app/page.tsxのrenderScreen()が各画面を表示します。SCR-00はホーム
 
 Web画面は無操作60秒で警告し、その後30秒で情報を消去してホームへ戻ります。完了画面は10秒で終了します。ホーム・完了画面・API処理中は通常の無操作監視の対象外です。
 
-バックエンドの登録草稿と顔認識セッションは別に管理され、無操作5分・総有効期間15分です。Androidの画面タイマーと警告ダイアログはAndroidアプリ側で実装します。
+バックエンドの登録途中の情報と顔認識セッションは別に管理され、無操作5分・総有効期間15分です。Androidの画面タイマーと警告ダイアログはAndroidアプリ側で実装します。
 
 本人確認の「ちがいます」はconfirmed=falseで連絡先確認APIを呼び、成功後に画面の個人情報を消去します。通知受付成功はバックエンドへの依頼受付を意味し、利用者端末は配信結果をポーリングしません。
 
 ## UI部品
 
-components/ui/の61ファイルはすべて保留しています。現在のページから使う部品はalert-dialog、button、checkbox、input、label、progress、select、sheet、table、textareaです。それ以外は予備部品で、sidebarはhooks/use-mobile.tsに依存します。
+components/ui/の61ファイルはすべて保持しています。現在のページから使う部品はalert-dialog、button、checkbox、input、label、progress、select、sheet、table、textareaです。それ以外は予備部品で、sidebarはhooks/use-mobile.tsに依存します。
 
 | ファイル | 提供するUI |
 | --- | --- |
@@ -153,4 +153,4 @@ components/ui/の61ファイルはすべて保留しています。現在のペ�
 
 プロジェクトルートでscripts/watch-api-log.ps1を実行すると、新しいリクエストをリアルタイム表示します。画面の操作後にmethod、path、request_body、status、response_bodyを確認します。
 
-キャッシュやdistは再生成される作業データです。node_modulesは保留し、ビルド結果を配布するときはnpm run buildで生成します。
+キャッシュやdistは再生成される作業データです。node_modulesは保持し、ビルド結果を配布するときはnpm run buildで生成します。

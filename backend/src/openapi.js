@@ -3,37 +3,37 @@ import { bodySchemas } from './validation.js';
 import { adminSchemas, adminRoutes } from './admin-service.js';
 
 const routes = [
-  ['post','/v1/registrations/capture','注册① 检查照片并返回临时 ID','photoCapture',201],
-  ['post','/v1/registrations','注册③ 一次保存全部登记资料','registration',201],
-  ['post','/v1/registrations/verify','注册④ 比对照片，通过后自动入队登记通知','registrationVerification',200,true],
-  ['get','/v1/registrations/{id}','查询临时登记进度'],
-  ['delete','/v1/registrations/{id}','取消临时登记','empty'],
-  ['post','/v1/users/{id}/recipients','安否② 确认本人并返回联系人和发送同意文面','recipientConfirmation',200,true],
-  ['post','/v1/safety-notifications','安否③ 同意并发送安否通知','safetyNotification',202,true],
-  ['get','/v1/mail-results/{id}','注册⑤／安否 只读查询邮件结果',null,200,true],
-  ['post','/v1/mail-results/{id}/retry','重试允许重试的失败收件人','empty',202,true],
-  ['get','/health/live','存活检查'], ['get','/health/ready','数据库与临时存储就绪检查'],
-  ['get','/v1/terminal','终端信息与 AWS 服务配置状态'],
-  ['get','/v1/consent-policies','获取当前同意文面'],
-  ['post','/v1/enrollments','开始临时登记','empty',201],
-  ['get','/v1/enrollments/{id}','查询临时登记进度'],
-  ['patch','/v1/enrollments/{id}/profile','暂存登记人姓名','profile'],
-  ['post','/v1/enrollments/{id}/face','核验并暂存上传照片或生体参考脸图','face'],
-  ['post','/v1/enrollments/{id}/consent','记录登记同意或拒绝','consent'],
-  ['put','/v1/enrollments/{id}/recipients','暂存一至两名联系人','recipients'],
-  ['post','/v1/enrollments/{id}/complete','原子保存正式登记资料','empty',201],
-  ['delete','/v1/enrollments/{id}','取消并清除临时登记','empty'],
-  ['post','/v1/faces/liveness-sessions','创建服务端生体检测会话','liveness',201],
-  ['post','/v1/faces/verify-registration','登记后重新核验脸部','face',200,true],
-  ['post','/v1/faces/identify','从有效登记人中识别本人','face'],
-  ['post','/v1/users/me/confirmation','确认或拒绝本人姓名','confirmation',200,true],
-  ['get','/v1/users/me/recipients','读取联系人姓名与掩码邮箱',null,200,true],
-  ['post','/v1/enrollments/{id}/confirmation-mails','开始发送登记确认邮件','empty',202,true],
-  ['post','/v1/safety-checks','本次同意并开始安否邮件发送','safety',202,true],
-  ['get','/v1/safety-checks/{id}','查询宛先逐项配信状态',null,200,true],
-  ['post','/v1/safety-checks/{id}/retry','只重试符合条件的失败宛先','empty',202,true],
-  ['delete','/v1/sessions/current','结束当前用户会话','empty',200,true],
-  ['post','/v1/mail/webhooks','接收并验证 SNS 的 SES 配信通知',null,204],
+  ['post','/v1/registrations/capture','登録① 写真を確認して一時 ID を返す','photoCapture',201],
+  ['post','/v1/registrations','登録③ 登録情報を一括保存する','registration',201],
+  ['post','/v1/registrations/verify','登録④ 写真を照合し、成功後に登録通知を自動でキューに追加する','registrationVerification',200,true],
+  ['get','/v1/registrations/{id}','仮登録の進捗を取得する'],
+  ['delete','/v1/registrations/{id}','仮登録を取り消す','empty'],
+  ['post','/v1/users/{id}/recipients','安否② 本人を確認し、連絡先と送信の同意文面を返す','recipientConfirmation',200,true],
+  ['post','/v1/safety-notifications','安否③ 同意に基づき安否確認通知を送信する','safetyNotification',202,true],
+  ['get','/v1/mail-results/{id}','登録⑤／安否 メール結果を読み取る',null,200,true],
+  ['post','/v1/mail-results/{id}/retry','再試行可能な送信失敗の宛先だけに再送する','empty',202,true],
+  ['get','/health/live','稼働状況の確認'], ['get','/health/ready','データベースと一時ストレージの準備状況の確認'],
+  ['get','/v1/terminal','端末情報と AWS サービスの設定状況'],
+  ['get','/v1/consent-policies','現在の同意文面を取得する'],
+  ['post','/v1/enrollments','仮登録を開始する','empty',201],
+  ['get','/v1/enrollments/{id}','仮登録の進捗を取得する'],
+  ['patch','/v1/enrollments/{id}/profile','登録者の氏名を一時保存する','profile'],
+  ['post','/v1/enrollments/{id}/face','アップロードした写真または生体検知の参照顔画像を確認して一時保存する','face'],
+  ['post','/v1/enrollments/{id}/consent','登録への同意または拒否を記録する','consent'],
+  ['put','/v1/enrollments/{id}/recipients','1～2 件の連絡先を一時保存する','recipients'],
+  ['post','/v1/enrollments/{id}/complete','正式な登録情報を一つのトランザクションで保存する','empty',201],
+  ['delete','/v1/enrollments/{id}','仮登録を取り消して消去する','empty'],
+  ['post','/v1/faces/liveness-sessions','サーバー側の生体検知セッションを作成する','liveness',201],
+  ['post','/v1/faces/verify-registration','登録後に顔を再確認する','face',200,true],
+  ['post','/v1/faces/identify','利用可能な登録者から本人を認証する','face'],
+  ['post','/v1/users/me/confirmation','表示された氏名が本人か確認または否定する','confirmation',200,true],
+  ['get','/v1/users/me/recipients','連絡先の氏名とマスク済みメールアドレスを取得する',null,200,true],
+  ['post','/v1/enrollments/{id}/confirmation-mails','登録確認メールの送信を開始する','empty',202,true],
+  ['post','/v1/safety-checks','今回の同意に基づき安否確認メールの送信を開始する','safety',202,true],
+  ['get','/v1/safety-checks/{id}','宛先ごとの配信状況を取得する',null,200,true],
+  ['post','/v1/safety-checks/{id}/retry','条件を満たす送信失敗の宛先だけに再送する','empty',202,true],
+  ['delete','/v1/sessions/current','現在の利用者セッションを終了する','empty',200,true],
+  ['post','/v1/mail/webhooks','SNS 経由の SES 配信通知を受信して検証する',null,204],
 ];
 
 export function openApiDocument() {
@@ -51,21 +51,21 @@ export function openApiDocument() {
       '/v1/users/{id}/recipients':'ContactsResult','/v1/safety-notifications':'SendResult',
       '/v1/mail-results/{id}':'MailResult','/v1/consent-policies':'Policy'
     }[path];
-    const responses = { [status]: { description: status===202 ? '发送请求已接受；用户端显示提交成功，不查询收件状态' : '成功',
+    const responses = { [status]: { description: status===202 ? '送信要求を受け付けました。利用者画面には送信成功を表示し、受信状況は問い合わせません' : '成功',
       ...(status!==204 ? { content:{ 'application/json':{ schema:responseName ? { $ref:`#/components/schemas/${responseName}` } : {type:'object'} } } } : {}) } };
-    if (['/v1/registrations','/v1/safety-notifications'].includes(path)) responses[200]={description:'用户拒绝同意，不创建邮件请求',content:{'application/json':{schema:{$ref:`#/components/schemas/${responseName}`}}}};
-    for (const error of [400,401,403,404,409,410,422,429,503]) responses[error]={ description:'参阅接口文档中的错误码',content:{ 'application/json':{ schema:{ $ref:'#/components/schemas/Error' } } } };
+    if (['/v1/registrations','/v1/safety-notifications'].includes(path)) responses[200]={description:'利用者が同意を拒否したため、メールの送信要求を作成しません',content:{'application/json':{schema:{$ref:`#/components/schemas/${responseName}`}}}};
+    for (const error of [400,401,403,404,409,410,422,429,503]) responses[error]={ description:'API 文書のエラーコードを参照してください',content:{ 'application/json':{ schema:{ $ref:'#/components/schemas/Error' } } } };
     paths[path] ??= {};
     paths[path][method]={ summary,security,parameters,responses,
       ...(body ? { requestBody:{ required:true,content:{ 'application/json':{ schema:z.toJSONSchema(bodySchemas[body],{ io:'input',unrepresentable:'any' }) } } } } : {}) };
-    if (path.startsWith('/v1/mail-results')) { paths[path][method].deprecated=true; paths[path][method].description='后端诊断保留接口。用户端不调用；管理端之后单独对接。'; }
+    if (path.startsWith('/v1/mail-results')) { paths[path][method].deprecated=true; paths[path][method].description='バックエンドの診断用に残している API です。利用者端末からは呼び出しません。管理画面とは今後別途連携します。'; }
     if (path.startsWith('/v1/enrollments') || path.startsWith('/v1/safety-checks') || path.startsWith('/v1/users/me') || path==='/v1/faces/verify-registration') paths[path][method].deprecated=true;
-    if (['photoCapture','registrationVerification'].includes(body)) paths[path][method].description='照片为 JPEG/PNG 的纯 Base64，解码后最多 512 KiB；图片模式不检测活体。比对通过自动入队登记通知，并返回 check_id 和 send_requested=true。';
+    if (['photoCapture','registrationVerification'].includes(body)) paths[path][method].description='写真は JPEG/PNG の Base64 データのみとし、デコード後の上限は 512 KiB です。画像モードでは生体検知を行いません。照合が成功すると登録通知を自動でキューに追加し、check_id と send_requested=true を返します。';
     if (path==='/v1/registrations/capture' || path==='/v1/registrations') paths[path][method].description =
-      (paths[path][method].description ?? '') + ' 仅与注册成功的 active 用户高度匹配时返回 409 FACE_ALREADY_REGISTERED；未完成的 pending_registration 不阻止重新登记，也不参与安否识别。不因姓名不同而允许已完成用户重复登记。';
-    if (path==='/v1/faces/liveness-sessions') paths[path][method].description='purpose=registration 时必须提供 user_id；enrollment 时须提供 enrollment_id。AWS Face Liveness 视频使用专用前端组件直接提交。';
-    if (body==='face') paths[path][method].description='二选一：image_base64（JPEG/PNG，解码后不超过512 KiB，不含 data URL 前缀）或 liveness_session_id。图片模式不检测活体。返回 metrics，分数为0–100；无可用候选时 similarity_score 为 null。登记接口仅返回图片质量指标。';
-    if (path.endsWith('/webhooks')) paths[path][method].description='SNS 签名、Topic ARN、时间窗口和事件 ID 均由后端校验，不接受未签名客户端配信状态。';
+      (paths[path][method].description ?? '') + ' 登録が完了した active の利用者と高い類似度で一致した場合だけ、409 FACE_ALREADY_REGISTERED を返します。未完了の pending_registration は再登録を妨げず、安否確認の顔認証にも使用しません。氏名が異なっていても、登録済み利用者の重複登録は許可しません。';
+    if (path==='/v1/faces/liveness-sessions') paths[path][method].description='purpose=registration の場合は user_id、enrollment の場合は enrollment_id が必須です。AWS Face Liveness の動画は専用のフロントエンドコンポーネントから直接送信します。';
+    if (body==='face') paths[path][method].description='image_base64（JPEG/PNG、デコード後 512 KiB 以下、data URL の接頭辞なし）または liveness_session_id のいずれかを指定します。画像モードでは生体検知を行いません。metrics のスコアは 0～100 です。有効な候補がない場合、similarity_score は null になります。登録 API は画像の品質指標だけを返します。';
+    if (path.endsWith('/webhooks')) paths[path][method].description='SNS の署名、Topic ARN、許容時間範囲、イベント ID をバックエンドで検証します。署名のないクライアントの配信状況は受け付けません。';
   }
   for (const [method,path,summary,body] of adminRoutes) {
     const parameters=[...path.matchAll(/\{([^}]+)\}/g)].map(([,name])=>({name,in:'path',required:true,schema:{type:'string'}}));
@@ -73,12 +73,12 @@ export function openApiDocument() {
       {name:'X-CSRF-Token',in:'header',required:true,schema:{type:'string'}},
       {name:'Idempotency-Key',in:'header',required:true,schema:{type:'string',maxLength:100}});
     const responses={200:{description:'成功'}};
-    for (const status of [400,401,403,404,409,429,503]) responses[status]={description:'错误',content:{'application/json':{schema:{$ref:'#/components/schemas/Error'}}}};
+    for (const status of [400,401,403,404,409,429,503]) responses[status]={description:'エラー',content:{'application/json':{schema:{$ref:'#/components/schemas/Error'}}}};
     paths[path]??={};
-    paths[path][method]={summary,tags:['管理端'],parameters,responses,security:path==='/v1/admin/login' ? [] : [{AdminCookie:[]}],
+    paths[path][method]={summary,tags:['管理者'],parameters,responses,security:path==='/v1/admin/login' ? [] : [{AdminCookie:[]}],
       ...(body ? {requestBody:{required:true,content:{'application/json':{schema:z.toJSONSchema(adminSchemas[body],{io:'input',unrepresentable:'any'})}}}} : {})};
   }
-  return { openapi:'3.1.0',info:{ title:'安心安否確認 用户端・管理端 API',version:'0.5.0' },servers:[{ url:'http://192.168.0.51:3002',description:'局域网开发后端（地址可能随 DHCP 改变）' },{url:'http://localhost:3002'}],paths,
+  return { openapi:'3.1.0',info:{ title:'安心安否確認 利用者・管理者 API',version:'0.5.0' },servers:[{ url:'http://192.168.0.51:3002',description:'開発用 LAN 内バックエンド（DHCP によりアドレスが変わる場合があります）' },{url:'http://localhost:3002'}],paths,
     components:{ securitySchemes:{AdminCookie:{type:'apiKey',in:'cookie',name:'anshin_admin'}},
     schemas:{ ...responseSchemas(), Error:{ type:'object',required:['error'],properties:{ error:{ type:'object',required:['code','message','request_id'],
       properties:{ code:{ type:'string' },message:{ type:'string' },request_id:{ type:'string',format:'uuid' },details:{ type:'object' } } } } } } } };

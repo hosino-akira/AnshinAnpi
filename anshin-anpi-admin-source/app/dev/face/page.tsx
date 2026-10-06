@@ -12,12 +12,12 @@ type Metrics = { similarity_score?: number | null; match_threshold?: number;
   liveness_score?: number | null };
 type Result = Partial<Session> & { result: string; display_name?: string; metrics: Metrics };
 type Attempt = { time: string; result: string; metrics: Metrics };
-const score = (value?: number | null) => typeof value === 'number' ? value.toFixed(2) : '无可用分数';
+const score = (value?: number | null) => typeof value === 'number' ? value.toFixed(2) : 'スコアなし';
 const faceClient = createFaceClient();
 
 async function readPhoto(file: File): Promise<string> {
   if (!['image/jpeg', 'image/png'].includes(file.type) || file.size > 10 * 1024 * 1024) {
-    throw new Error('请选择 10 MiB 以下的 JPEG 或 PNG 图片。');
+    throw new Error('10 MiB 以下の JPEG または PNG 画像を選択してください。');
   }
   const bitmap = await createImageBitmap(file);
   try {
@@ -26,14 +26,14 @@ async function readPhoto(file: File): Promise<string> {
     canvas.width = Math.max(1, Math.round(bitmap.width * ratio));
     canvas.height = Math.max(1, Math.round(bitmap.height * ratio));
     const context = canvas.getContext('2d');
-    if (!context) throw new Error('无法读取图片。');
+    if (!context) throw new Error('画像を読み込めません。');
     context.fillStyle = '#fff'; context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     for (const quality of [0.85, 0.7, 0.5]) {
       const base64 = canvas.toDataURL('image/jpeg', quality).split(',')[1];
       if (base64.length <= 690000) return base64;
     }
-    throw new Error('压缩后的图片仍过大，请选择较小图片。');
+    throw new Error('圧縮後も画像が大きすぎます。より小さい画像を選択してください。');
   } finally { bitmap.close(); }
 }
 
@@ -48,7 +48,7 @@ export default function FaceDevelopmentPage() {
   const [busy, setBusy] = useState(false);
   const [reading, setReading] = useState(false);
   const [registered, setRegistered] = useState(false);
-  const [message, setMessage] = useState('正在连接本地后端…');
+  const [message, setMessage] = useState('ローカルのバックエンドに接続しています…');
   const [error, setError] = useState('');
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [checkId, setCheckId] = useState<string>();
@@ -68,9 +68,9 @@ export default function FaceDevelopmentPage() {
     let active = true;
     Promise.all([faceClient.terminal(), faceClient.registrationPolicy()]).then(([terminal, currentPolicy]) => {
       if (!active) return;
-      if (!terminal.capabilities.face) throw new Error('后端人脸服务尚未配置。');
-      setPolicy(currentPolicy); setConnected(true); setMessage('连接就绪。选择照片后可以登记或识别。');
-    }).catch(() => { if (active) setError('后端连接失败，请确认本地开发服务已启动。'); });
+      if (!terminal.capabilities.face) throw new Error('バックエンドの顔認証サービスが設定されていません。');
+      setPolicy(currentPolicy); setConnected(true); setMessage('接続しました。写真を選択すると登録や顔認証を行えます。');
+    }).catch(() => { if (active) setError('バックエンドへの接続に失敗しました。ローカルの開発サービスが起動しているか確認してください。'); });
     return () => {
       active = false; readVersion.current++;
       if (draftId.current) void faceClient.cancelRegistration(draftId.current).catch(() => {});
@@ -82,28 +82,28 @@ export default function FaceDevelopmentPage() {
   const failure = (cause: unknown) => {
     if (cause instanceof FaceApiError) {
       const descriptions: Record<string, string> = {
-        'FACE-001': '图片中没有检测到人脸。', 'FACE-002': '请上传只有一张人脸的照片。',
-        FACE_QUALITY_FAILED: '照片未通过质量检查，请检查清晰度、光线和脸部角度。',
-        INVALID_FACE_IMAGE: '后端只接受 512 KiB 以下的 JPEG 或 PNG 图片。',
-        FACE_VERIFICATION_REQUIRED: '验证会话已过期，请结束本次操作后重新开始。',
-        'TIME-001': '临时登记已过期，请重新开始。',
-        FACE_SERVICE_UNAVAILABLE: 'AWS 人脸服务暂时不可用。',
-        FACE_AUTH_EXPIRED: '本机 AWS 登录已过期，请重新登录后重启后端。',
-        FACE_ACCESS_DENIED: 'AWS 拒绝了人脸接口请求，请检查 IAM 权限。',
+        'FACE-001': '画像から顔が検出されませんでした。', 'FACE-002': '一人の顔だけが写っている写真をアップロードしてください。',
+        FACE_QUALITY_FAILED: '写真の品質基準を満たしていません。鮮明さ、明るさ、顔の角度を確認してください。',
+        INVALID_FACE_IMAGE: 'バックエンドは 512 KiB 以下の JPEG または PNG 画像だけを受け付けます。',
+        FACE_VERIFICATION_REQUIRED: '認証セッションの有効期限が切れました。今回の操作を終了してからやり直してください。',
+        'TIME-001': '仮登録の有効期限が切れました。やり直してください。',
+        FACE_SERVICE_UNAVAILABLE: 'AWS の顔認証サービスは一時的に利用できません。',
+        FACE_AUTH_EXPIRED: 'この端末の AWS ログインの有効期限が切れました。再ログインしてからバックエンドを再起動してください。',
+        FACE_ACCESS_DENIED: 'AWS が顔認証 API の要求を拒否しました。IAM の権限を確認してください。',
       };
-      setError(cause.status === 429 ? `操作受限，请${cause.retryAfterSeconds ? `等待 ${cause.retryAfterSeconds} 秒后` : '稍后'}重试。`
-        : (descriptions[cause.code] || `操作未完成：${cause.code}`)
+      setError(cause.status === 429 ? `操作が制限されています。${cause.retryAfterSeconds ? `${cause.retryAfterSeconds} 秒後に` : 'しばらくしてから'}再試行してください。`
+        : (descriptions[cause.code] || `操作が完了しませんでした：${cause.code}`)
           + (typeof cause.details?.aws_error === 'string' ? `（${cause.details.aws_error} / ${cause.details.aws_operation}）` : ''));
-      addResult('未完成', (cause.details ?? {}) as Metrics);
-    } else { setError(cause instanceof Error ? cause.message : '操作未完成，请重试。'); addResult('未完成', {}); }
+      addResult('未完了', (cause.details ?? {}) as Metrics);
+    } else { setError(cause instanceof Error ? cause.message : '操作が完了しませんでした。再試行してください。'); addResult('未完了', {}); }
   };
 
   const run = async (purpose: 'enrollment' | 'registration' | 'safety') => {
     if (!photo || !consent || pending.current) return;
     if (purpose === 'enrollment' && (!policy || !displayName.trim() || !contactName.trim() || !contactEmail.trim())) {
-      setError('请填写本人姓名、联系人姓名和邮箱。'); return;
+      setError('ご本人の氏名、連絡先の氏名とメールアドレスを入力してください。'); return;
     }
-    pending.current = true; setBusy(true); setError(''); setMessage('后端正在处理照片…');
+    pending.current = true; setBusy(true); setError(''); setMessage('バックエンドで写真を処理しています…');
     try {
       if (purpose === 'enrollment') {
         if (draftId.current) {
@@ -115,24 +115,24 @@ export default function FaceDevelopmentPage() {
         draftId.current = draft.temp_id;
         const completed = await faceClient.register({ temp_id: draft.temp_id, display_name: displayName,
           policy_version: policy!.policy_version, consent_result: 'granted', recipients: [{ name: contactName, email: contactEmail }] });
-        if (!completed.user_id) throw new Error('登记未完成。');
+        if (!completed.user_id) throw new Error('登録が完了しませんでした。');
         session.current = { user_id: completed.user_id };
         draftId.current = undefined; setRegistered(true); setIdentified(false); setCheckId(undefined);
-        addResult('资料保存成功，待二次验证', draft.metrics); setDisplayName(''); setContactName(''); setContactEmail('');
-        setMessage('照片已登记。请上传另一张照片验证刚登记的人脸。');
+        addResult('情報を保存しました。再撮影による本人確認待ちです', draft.metrics); setDisplayName(''); setContactName(''); setContactEmail('');
+        setMessage('写真を登録しました。別の写真をアップロードして、登録した顔を確認してください。');
       } else {
         const result = purpose === 'registration'
           ? await faceClient.verifyAndNotify(photo, session.current?.user_id ?? '')
           : await faceClient.identify(photo);
-        addResult(result.result === 'matched' ? '匹配成功' : result.result === 'ambiguous' ? '候选相近，无法确认' : '未匹配', result.metrics);
+        addResult(result.result === 'matched' ? '照合成功' : result.result === 'ambiguous' ? '候補が似ているため確認できません' : '該当なし', result.metrics);
         if (result.result === 'matched' && result.user_id) {
           session.current = { user_id: result.user_id };
           setCheckId(result.check_id); setSafetyContacts(undefined); setSafetyConsent(false);
           setIdentified(purpose === 'safety');
-          setMessage(`匹配成功：${result.display_name ?? '本人'}。相似度 ${score(result.metrics.similarity_score)} 分。${result.check_id ? '登记通知提交成功。' : '请确认是本人后获取联系人。'}`);
-        } else setMessage('未能确认本人，请查看评分。日常识别只匹配已激活用户。');
+          setMessage(`照合成功：${result.display_name ?? 'ご本人'}。類似度 ${score(result.metrics.similarity_score)} 点。${result.check_id ? '登録通知の送信要求を受け付けました。' : 'ご本人か確認してから連絡先を取得してください。'}`);
+        } else setMessage('本人を確認できませんでした。評価を確認してください。通常の顔認証は利用開始済みの利用者だけを対象とします。');
       }
-    } catch (cause) { failure(cause); setMessage('本次操作未完成。'); }
+    } catch (cause) { failure(cause); setMessage('今回の操作は完了しませんでした。'); }
     finally { clearPhoto(); setConsent(false); pending.current = false; setBusy(false); }
   };
 
@@ -151,7 +151,7 @@ export default function FaceDevelopmentPage() {
       draftId.current = undefined; session.current = undefined;
       setRegistered(false); clearPhoto(); setDisplayName(''); setContactName(''); setContactEmail('');
       setCheckId(undefined); setSafetyContacts(undefined); setSafetyConsent(false); setIdentified(false);
-      setConsent(false); setAttempts([]); setError(''); setMessage('已结束操作。');
+      setConsent(false); setAttempts([]); setError(''); setMessage('操作を終了しました。');
     } catch (cause) { failure(cause); } finally { pending.current = false; setBusy(false); }
   };
 
@@ -163,22 +163,22 @@ export default function FaceDevelopmentPage() {
       if (action === 'contacts') setSafetyContacts(await faceClient.confirmRecipients(current.user_id, true));
       if (action === 'send' && safetyConsent && safetyContacts?.policy_version) {
         const result = await faceClient.notifySafety(current.user_id, true, safetyContacts.policy_version);
-        setCheckId(result.check_id ?? undefined); setMessage('发送成功，安否通知请求已提交。');
+        setCheckId(result.check_id ?? undefined); setMessage('送信成功。安否確認通知の送信要求を受け付けました。');
       }
 
-    } catch (cause) { if (action === 'send') { setError(''); setMessage('操作已结束。'); } else failure(cause); }
+    } catch (cause) { if (action === 'send') { setError(''); setMessage('操作は終了しました。'); } else failure(cause); }
     finally { pending.current = false; setBusy(false); }
   };
 
-  if (!import.meta.env.DEV) return <main className="face-dev"><p>此测试页面仅供本地开发使用。</p></main>;
+  if (!import.meta.env.DEV) return <main className="face-dev"><p>このテストページはローカル開発専用です。</p></main>;
   return <main className="face-dev">
-    <header><a href="/">返回首页</a><h1>图片人脸识别联调</h1>
-      <p>上传 JPEG 或 PNG 照片，由后端检查图片并识别人脸。不需要靠近屏幕完成活体挑战。</p>
-      <p>图片模式不进行活体检测。识别分数表示人脸相似度，登记照片没有匹配分数。</p></header>
+    <header><a href="/">ホームに戻る</a><h1>写真による顔認証の連携テスト</h1>
+      <p>JPEG または PNG の写真をアップロードすると、バックエンドで画像を確認し、顔認証を行います。生体検知のために画面へ近づく操作は不要です。</p>
+      <p>画像モードでは生体検知を行いません。認証スコアは顔の類似度を示します。登録時の写真には照合スコアがありません。</p></header>
     <p role="status" className="face-status">{message}</p>
     {error && <p role="alert" className="face-error">{error}</p>}
-    <section className="face-card"><h2>选择本次照片</h2>
-      <input ref={fileInput} aria-label="人脸照片" type="file" accept="image/jpeg,image/png" capture="user" disabled={busy || reading}
+    <section className="face-card"><h2>今回使用する写真を選択</h2>
+      <input ref={fileInput} aria-label="顔写真" type="file" accept="image/jpeg,image/png" capture="user" disabled={busy || reading}
         onChange={e => {
           const file = e.target.files?.[0]; const version = ++readVersion.current;
           setPhoto(undefined); setError(''); if (!file) return; setReading(true);
@@ -186,38 +186,38 @@ export default function FaceDevelopmentPage() {
             .catch(cause => { if (version === readVersion.current) setError(cause.message); })
             .finally(() => { if (version === readVersion.current) setReading(false); });
         }}/>
-      {reading && <p>正在压缩图片…</p>}
-      {photo && <img src={`data:image/jpeg;base64,${photo}`} alt="待上传照片预览" style={{ maxWidth: '100%', maxHeight: 280 }}/>}
-      {policy && <details><summary>查看登记同意文案</summary><p>{policy.body}</p></details>}
+      {reading && <p>画像を圧縮しています…</p>}
+      {photo && <img src={`data:image/jpeg;base64,${photo}`} alt="アップロードする写真のプレビュー" style={{ maxWidth: '100%', maxHeight: 280 }}/>}
+      {policy && <details><summary>登録の同意文面を確認</summary><p>{policy.body}</p></details>}
       <label className="face-consent"><input type="checkbox" checked={consent} disabled={busy}
-        onChange={e => setConsent(e.target.checked)}/>我同意将本次照片提交 AWS 进行人脸处理；登记时同时保存姓名和联系人信息。</label>
+        onChange={e => setConsent(e.target.checked)}/>今回の写真を AWS に送信して顔認証に使用すること、および登録時に氏名と連絡先の情報を保存することに同意します。</label>
     </section>
     {!registered ? <>
-      <section className="face-card"><h2>登记测试</h2>
-        <label>本人姓名<input value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={50} disabled={busy}/></label>
-        <label>联系人姓名<input value={contactName} onChange={e => setContactName(e.target.value)} maxLength={50} disabled={busy}/></label>
-        <label>联系人邮箱<input type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)} disabled={busy}/></label>
-        <button disabled={!connected || !photo || !consent || busy || reading} onClick={() => void run('enrollment')}>上传照片并登记</button>
+      <section className="face-card"><h2>登録テスト</h2>
+        <label>ご本人の氏名<input value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={50} disabled={busy}/></label>
+        <label>連絡先の氏名<input value={contactName} onChange={e => setContactName(e.target.value)} maxLength={50} disabled={busy}/></label>
+        <label>連絡先のメールアドレス<input type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)} disabled={busy}/></label>
+        <button disabled={!connected || !photo || !consent || busy || reading} onClick={() => void run('enrollment')}>写真をアップロードして登録</button>
       </section>
-      <section className="face-card"><h2>识别已有用户</h2><p>仅匹配已完成邮件激活的用户。</p>
-        <button disabled={!connected || !photo || !consent || busy || reading} onClick={() => void run('safety')}>上传照片并识别</button></section>
-    </> : !checkId && <section className="face-card"><h2>验证刚登记的人脸</h2><p>请选择另一张照片，并勾选本次同意。</p>
-      <button disabled={!photo || !consent || busy || reading} onClick={() => void run('registration')}>上传照片验证本人</button></section>}
-    {identified && !checkId && <section className="face-card"><h2>安否邮件</h2>
-      {!safetyContacts && <button disabled={busy} onClick={() => void runMail('contacts')}>是本人，获取联系人</button>}
+      <section className="face-card"><h2>登録済みの利用者を認証</h2><p>登録通知メールの送信が受理され、利用開始済みの利用者だけを照合します。</p>
+        <button disabled={!connected || !photo || !consent || busy || reading} onClick={() => void run('safety')}>写真をアップロードして認証</button></section>
+    </> : !checkId && <section className="face-card"><h2>登録した顔を確認</h2><p>別の写真を選択し、今回の利用に同意するチェックを入れてください。</p>
+      <button disabled={!photo || !consent || busy || reading} onClick={() => void run('registration')}>写真をアップロードして本人確認</button></section>}
+    {identified && !checkId && <section className="face-card"><h2>安否確認メール</h2>
+      {!safetyContacts && <button disabled={busy} onClick={() => void runMail('contacts')}>本人です。連絡先を取得</button>}
       {safetyContacts && <><ul>{safetyContacts.recipients.map(contact => <li key={contact.recipient_id}>{contact.name}：{contact.masked_email}</li>)}</ul>
         <p>{safetyContacts.consent_body}</p>
-        <label><input type="checkbox" checked={safetyConsent} onChange={e => setSafetyConsent(e.target.checked)}/>我同意向以上联系人发送本次安否通知</label>
-        <button disabled={busy || !safetyConsent} onClick={() => void runMail('send')}>同意并发送安否邮件</button></>}
+        <label><input type="checkbox" checked={safetyConsent} onChange={e => setSafetyConsent(e.target.checked)}/>上記の連絡先に今回の安否確認通知を送信することに同意します</label>
+        <button disabled={busy || !safetyConsent} onClick={() => void runMail('send')}>同意して安否確認メールを送信</button></>}
     </section>}
-    {checkId && <section className="face-card"><h2>发送成功</h2><p>发送请求已提交。</p></section>}
-    {attempts.length > 0 && <section className="face-card"><h2>最近检测评分</h2>{attempts.map((attempt, index) =>
+    {checkId && <section className="face-card"><h2>送信成功</h2><p>送信要求を受け付けました。</p></section>}
+    {attempts.length > 0 && <section className="face-card"><h2>直近の検出結果</h2>{attempts.map((attempt, index) =>
       <article key={`${attempt.time}-${index}`}><h3>{attempt.time} · {attempt.result}</h3>
-        <p>人脸相似度：{score(attempt.metrics.similarity_score)}
-          {attempt.metrics.match_threshold !== undefined && `；匹配门槛：${score(attempt.metrics.match_threshold)}`}</p>
-        <p>人脸检测置信度：{score(attempt.metrics.face_confidence)}；亮度：{score(attempt.metrics.brightness)}；清晰度：{score(attempt.metrics.sharpness)}</p>
-        <p>活体分数：图片模式不检测活体</p>
+        <p>顔の類似度：{score(attempt.metrics.similarity_score)}
+          {attempt.metrics.match_threshold !== undefined && `；照合のしきい値：${score(attempt.metrics.match_threshold)}`}</p>
+        <p>顔検出の信頼度：{score(attempt.metrics.face_confidence)}；明るさ：{score(attempt.metrics.brightness)}；鮮明さ：{score(attempt.metrics.sharpness)}</p>
+        <p>生体検知スコア：画像モードでは生体検知を行いません</p>
       </article>)}</section>}
-    <button className="face-secondary" disabled={busy || reading} onClick={() => void cancel()}>结束操作并清空界面</button>
+    <button className="face-secondary" disabled={busy || reading} onClick={() => void cancel()}>操作を終了して画面の情報を消去</button>
   </main>;
 }
