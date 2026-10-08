@@ -95,7 +95,7 @@ function responseSchemas() {
     Metrics:object({similarity_score:nullableScore,match_threshold:nullableScore,face_confidence:nullableScore,brightness:nullableScore,sharpness:nullableScore,
       yaw:{type:['number','null']},pitch:{type:['number','null']},roll:{type:['number','null']},liveness_passed:flag,liveness_score:nullableScore},['liveness_passed']),
     RecipientResult:object({delivery_id:uuid,recipient_id:uuid,status:text,error_code:{type:['string','null']},attempt_count:{type:'integer'}},['delivery_id','recipient_id','status']),
-    Policy:object({policy_version:text,title:text,body:text},['policy_version','title','body']),
+    Policy:object({policy_version:text,title:text,body:{type:'string',description:'同意本文。見出しは h2/h3、段落は p の HTML タグで返す。'}},['policy_version','title','body']),
     CaptureResult:object({temp_id:uuid,face_valid:flag,expires_at:session.expires_at,idle_timeout_seconds:{type:'integer'},metrics},['temp_id','face_valid','expires_at','idle_timeout_seconds','metrics']),
     RegistrationResult:object({success:flag,user_id:{type:['string','null'],format:'uuid'},user_status:{type:['string','null'],enum:['pending_registration',null]},registration_completed:flag,status:text},['success','user_id','user_status','registration_completed']),
     FaceResult:object({user_id:uuid,user_status:text,check_id:uuid,send_requested:flag,registration_completed:flag,matched:flag,result:{type:'string',enum:['matched','no_match','ambiguous']},display_name:text,metrics,similarity_score:nullableScore,verification_status:text,attempts_remaining:{type:'integer'},recovered:flag},['matched','result','metrics','verification_status']),

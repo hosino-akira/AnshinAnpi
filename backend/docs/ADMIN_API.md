@@ -56,7 +56,7 @@
 | GET `/dashboard` | なし | `counts`, `errors`, `activities` |
 | GET `/users` | 任意のクエリ：`limit`（1～200、既定値 100）, `offset`（0～100000、既定値 0） | `users`, `total`, `offset`, `limit` |
 | POST `/users/search` | `name`, `reason`。氏名全体で検索 | `users`, `total`, `offset`, `limit` |
-| PUT `/users/{id}` | `name`, `status`, `recipients`, `expected_revision`, `identity_confirmed: true`, `reason`。任意：`reset_face`（既定値 false） | `user`, `notification_check_id` |
+| PUT `/users/{id}` | `name`, `status`, `recipients`, `expected_revision`, `identity_confirmed: true`, `reason`。任意：`reset_face`（既定値 false） | `user` |
 | DELETE `/users/{id}` | `expected_revision`, `reason: "deletion"` | `deleted: true` |
 | DELETE `/users/{id}/recipients/{recipientId}` | `expected_revision`, `reason: "deletion"` | `user` |
 | POST `/users/{id}/face` | `image_base64`, `expected_revision`, `owner_present: true`, `consent_granted: true`, `policy_version` | `user`, `liveness_passed: false` |
@@ -75,8 +75,8 @@
 
 ## データの連携
 
-- 利用中の登録者の連絡先メールアドレスを変更、または連絡先を追加する場合、変更と確認メールのキューへの追加を同一のデータベーストランザクションで行います。SMTP が未設定の場合は変更を拒否し、通知済みとは扱いません。利用停止中または登録未完了の利用者は、連絡先の変更によって通知を送信しません。
-- 連絡先の変更時には旧宛先の送信待ちメールを取り消し、過去のメールアドレスのスナップショットを消去して、古い情報による送信を防ぎます。通知には既存の `safety_checks` / `mail_deliveries` を使用し、`contact_change` 種別を追加します。別のキューは作成しません。
+- 連絡先の追加・変更・削除は、メールを送信せずに同一のデータベーストランザクションで保存します。連絡先の変更に SMTP の設定は不要です。
+- 連絡先の変更時には旧宛先の送信待ちメールを取り消し、過去のメールアドレスのスナップショットを消去して、古い情報による送信を防ぎます。変更通知メールは送信しません。メールは登録通知と安否確認通知の 2 種類だけです。旧実装で作成されたその他の種類の送信待ちメールは、配信ワーカーが取り消します。
 - 利用停止、削除、顔の再登録要求は、認証資格を直ちに失効させ、送信待ちメールを取り消します。利用停止後の再開には本人立会いで顔の再登録が必要です。失効済みのクラウド上の特徴量は復元しません。
 - 顔の再登録では既存の写真による認証方式を使用し、画像品質と重複登録を確認します。生体検知に成功したとは扱いません。写真は要求の処理中のメモリ内だけで扱い、元の画像は保存しません。管理画面には共通の人物アイコンを使用します。
 - 削除時は業務上の氏名、メールアドレス、配信スナップショットを直ちに消去します。AWS の特徴量は既存の削除ワーカーが削除します。30 日間が経過し、外部の特徴量の削除が成功した後に利用者の行を物理削除します。メールワーカーを有効にしておく必要があります。外部データの削除に失敗した場合は、再試行用の参照情報を保持します。

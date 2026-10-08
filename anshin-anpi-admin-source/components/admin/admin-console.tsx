@@ -1,5 +1,7 @@
 "use client";
 
+import { PolicyContent } from "@/components/policy-content";
+
 /**
  * 安心安否確認システム：管理者用UI
  *
@@ -2133,22 +2135,7 @@ export default function AdminConsole() {
                       <span className="preview-label">
                         利用者画面プレビュー
                       </span>
-                      <h3>
-                        {privacyText.split("\n")[0] ||
-                          "個人情報の取扱い"}
-                      </h3>
-                      {privacyText
-                        .split("\n")
-                        .slice(1)
-                        .map((line, index) =>
-                          line ? (
-                            <p key={`${line}-${index}`}>
-                              {line}
-                            </p>
-                          ) : (
-                            <br key={`break-${index}`} />
-                          ),
-                        )}
+                      <PolicyContent body={privacyText} />
                     </div>
                   )}
                 </section>

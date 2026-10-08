@@ -41,6 +41,12 @@ export class MailWorker {
       const check = (await db.query('SELECT * FROM safety_checks WHERE check_id=$1 FOR UPDATE', [metadata.check_id])).rows[0];
       const delivery = (await db.query('SELECT * FROM mail_deliveries WHERE delivery_id=$1 FOR UPDATE', [id])).rows[0];
       if (!delivery || delivery.status !== 'sending' || delivery.provider !== this.mail.name) return;
+      // Historical queues can contain types removed from the specification.
+      if (check && !['registration', 'safety'].includes(check.check_type)) {
+        await db.query(`UPDATE mail_deliveries SET status='cancelled',error_code='MAIL_TYPE_UNSUPPORTED',next_attempt_at=NULL WHERE delivery_id=$1`, [id]);
+        await updateCheck(db, metadata.check_id);
+        return;
+      }
       const terminal = check && (await db.query('SELECT * FROM terminals WHERE terminal_id=$1 FOR SHARE', [check.terminal_id])).rows[0];
       const consent = check && (await db.query('SELECT * FROM consents WHERE consent_id=$1 FOR SHARE', [check.consent_id])).rows[0];
       const withdrawn = user && (await db.query(`SELECT 1 FROM consents WHERE user_id=$1 AND result='withdrawn'

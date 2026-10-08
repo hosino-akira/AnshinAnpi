@@ -26,6 +26,8 @@ POST / DELETE には Content-Type: application/json と Idempotency-Key: <今回
 
 recipients は 1～2 件の連絡先です：[{"name":"家族","email":"family@example.com"}]。
 consent_result は granted / denied です。同意を拒否した場合は利用者を作成しません。
+
+登録同意の `body` は HTML 文字列です。主見出しは `h2`、小見出しは `h3`、本文は `p` タグで返します。フロントエンドでは属性を許可せず、この 3 種類のタグだけを表示に使用してください。`title` はタグを含まない文字列です。
 2 回目の写真は今回の user_id に対応する顔だけと比較します。matched=false の場合は撮り直し、メールを送信しません。
 照合に成功して send_requested=true が返されたら、利用者画面に通知の送信要求の受付成功を表示し、操作を終了します。**従来の登録⑤のメール結果のポーリング手順は削除します。**
 バックグラウンドでメールの処理結果に応じて登録状態を更新します。利用者画面では実際の結果を待機・表示しません。

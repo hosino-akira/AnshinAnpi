@@ -98,20 +98,6 @@ export class AdminService {
     await db.query(`UPDATE recipients SET status='deleted',name=$2,encrypted_email=$3 WHERE recipient_id=$1`,
       [id,await this.cipher.seal('削除済み','recipient-name'),await this.cipher.seal('','recipient-email')]);
   }
-  async queueCorrection(db, user, changed, request) {
-    if (!changed.length || user.status !== 'active') return null;
-    if (!this.mail.ready) fail(503,'SERVICE_NOT_CONFIGURED','変更確認メールを送るため、メール設定が必要です。');
-    const key = `admin:${request.headers['idempotency-key']}`;
-    const terminalId = user.terminal_id ?? (await db.query("SELECT terminal_id FROM terminals WHERE status='active' ORDER BY created_at LIMIT 1")).rows[0]?.terminal_id;
-    const consent=(await db.query("SELECT consent_id FROM consents WHERE user_id=$1 AND consent_type='registration' AND result='granted' ORDER BY consented_at DESC LIMIT 1",[user.user_id])).rows[0];
-    if (!consent) fail(409,'REGISTRATION_CONSENT_REQUIRED','登録時の同意記録を確認してください。');
-    const check = (await db.query(`INSERT INTO safety_checks(user_id,terminal_id,check_type,verified_at,idempotency_key,request_sha256,consent_id,expires_at)
-      VALUES($1,$2,'contact_change',clock_timestamp(),$3,$4,$5,clock_timestamp()+interval '15 minutes') RETURNING check_id`,
-      [user.user_id,terminalId,key,sha256(canonical(request.body)),consent.consent_id])).rows[0];
-    for (const recipient of changed) await db.query(`INSERT INTO mail_deliveries(check_id,user_id,recipient_id,recipient_order_no,encrypted_email_snapshot,provider,next_attempt_at)
-      VALUES($1,$2,$3,$4,$5,$6,clock_timestamp())`, [check.check_id,user.user_id,recipient.recipient_id,recipient.order_no,recipient.encrypted_email,this.mail.name]);
-    return check.check_id;
-  }
   async updateUser(request, body) {
     return transaction(this.pool, async db => {
       const user = await this.user(db,request.params.id,body.expected_revision);
@@ -123,17 +109,15 @@ export class AdminService {
       for (const old of existing) if (!ids.includes(old.recipient_id)) await this.eraseRecipient(db,old.recipient_id);
       // Temporarily free the two order slots, then restore selected recipients atomically.
       await db.query("UPDATE recipients SET status='deleted' WHERE user_id=$1 AND status<>'deleted'",[user.user_id]);
-      const changed = [];
       for (const [index,recipient] of body.recipients.entries()) {
         const old = existing.find(x=>x.recipient_id===recipient.id);
         const addressChanged = !old || await this.cipher.open(old.encrypted_email,'recipient-email') !== recipient.email;
         if (old && addressChanged) await this.cancelRecipient(db,old.recipient_id);
         const values = [user.user_id,await this.cipher.seal(recipient.name,'recipient-name'),await this.cipher.seal(recipient.email,'recipient-email'),index+1];
-        const row = old ? (await db.query(`UPDATE recipients SET name=$2,encrypted_email=$3,order_no=$4,
-          status=$5,bounce_count=CASE WHEN $6 THEN 0 ELSE bounce_count END WHERE recipient_id=$1 RETURNING *`,
-          [old.recipient_id,...values.slice(1),addressChanged ? 'active' : old.status,addressChanged])).rows[0]
-          : (await db.query('INSERT INTO recipients(user_id,name,encrypted_email,order_no) VALUES($1,$2,$3,$4) RETURNING *',values)).rows[0];
-        if (addressChanged) changed.push(row);
+        if (old) await db.query(`UPDATE recipients SET name=$2,encrypted_email=$3,order_no=$4,
+          status=$5,bounce_count=CASE WHEN $6 THEN 0 ELSE bounce_count END WHERE recipient_id=$1`,
+          [old.recipient_id,...values.slice(1),addressChanged ? 'active' : old.status,addressChanged]);
+        else await db.query('INSERT INTO recipients(user_id,name,encrypted_email,order_no) VALUES($1,$2,$3,$4)',values);
       }
       const targetStatus = body.reset_face ? 'suspended' : body.status;
       if (targetStatus === 'active' && !(await db.query("SELECT 1 FROM face_templates WHERE user_id=$1 AND status='active'",[user.user_id])).rowCount)
@@ -143,10 +127,8 @@ export class AdminService {
       await db.query(`UPDATE users SET display_name=$2,status=$3::varchar,suspended_at=CASE WHEN $3::varchar='suspended' THEN clock_timestamp() ELSE NULL END WHERE user_id=$1`,
         [user.user_id,await this.cipher.seal(body.name,'user-name'),targetStatus]);
       if (body.reset_face) await db.query("UPDATE face_templates SET status='revoked' WHERE user_id=$1 AND status='active'",[user.user_id]);
-      user.status = targetStatus;
-      const checkId = await this.queueCorrection(db,user,changed,request);
       await audit(db,this.config,request,body.reset_face ? 'admin.face.reset' : 'admin.user.updated','user',user.user_id);
-      return { user: await this.serialize(db,await this.user(db,user.user_id)), notification_check_id: checkId };
+      return { user: await this.serialize(db,await this.user(db,user.user_id)) };
     });
   }
   async deleteUser(request, body) {
@@ -271,7 +253,8 @@ export class AdminService {
       if ((await db.query('SELECT 1 FROM app_meta.admin_settings WHERE setting_key=$1',[key])).rowCount) fail(409,'POLICY_VERSION_EXISTS','新しい版番号を指定してください。');
       const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
       if (body.effective_date<today) fail(400,'POLICY_DATE_IN_PAST','適用日は本日以降にしてください。');
-      await db.query('INSERT INTO app_meta.admin_settings(setting_key,document) VALUES($1,$2)',[key,{...body,title:body.body.split('\n')[0].trim().slice(0,100),requires_reconsent:false,consent_type:type,status:'published'}]);
+      const heading = body.body.match(/<h2>([^<]*)<\/h2>/i)?.[1] ?? body.body.split('\n')[0];
+      await db.query('INSERT INTO app_meta.admin_settings(setting_key,document) VALUES($1,$2)',[key,{...body,title:heading.trim().slice(0,100),requires_reconsent:false,consent_type:type,status:'published'}]);
       await audit(db,this.config,request,'admin.policy.published','policy',key);
       return { published:true,effective_date:body.effective_date };
     });

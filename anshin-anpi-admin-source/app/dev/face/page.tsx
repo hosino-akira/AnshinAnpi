@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { faceApi, FaceApiError } from '@/lib/face-api';
 import { createFaceClient } from '@/lib/face-client';
+import { PolicyContent } from '@/components/policy-content';
 import './face.css';
 
 type Policy = { policy_version: string; body: string };
@@ -188,7 +189,7 @@ export default function FaceDevelopmentPage() {
         }}/>
       {reading && <p>画像を圧縮しています…</p>}
       {photo && <img src={`data:image/jpeg;base64,${photo}`} alt="アップロードする写真のプレビュー" style={{ maxWidth: '100%', maxHeight: 280 }}/>}
-      {policy && <details><summary>登録の同意文面を確認</summary><p>{policy.body}</p></details>}
+      {policy && <details><summary>登録の同意文面を確認</summary><PolicyContent body={policy.body} /></details>}
       <label className="face-consent"><input type="checkbox" checked={consent} disabled={busy}
         onChange={e => setConsent(e.target.checked)}/>今回の写真を AWS に送信して顔認証に使用すること、および登録時に氏名と連絡先の情報を保存することに同意します。</label>
     </section>

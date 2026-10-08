@@ -59,6 +59,7 @@ import {
 
 } from "@/lib/face-client";
 import { FaceApiError } from "@/lib/face-api";
+import { PolicyContent } from "@/components/policy-content";
 
 const faceClient = createFaceClient();
 
@@ -1289,9 +1290,7 @@ export default function Home() {
               aria-label="個人情報の取扱い本文"
             >
               {registrationPolicy ? (
-                <p style={{ whiteSpace: "pre-wrap" }}>
-                  {registrationPolicy.body}
-                </p>
+                <PolicyContent body={registrationPolicy.body} />
               ) : (
                 <p>
                   同意文面を読み込んでいます。接続状態をご確認ください。

@@ -453,7 +453,8 @@
 .editor-foot small { color: var(--admin-muted); font-size: 10px; }
 .privacy-preview { min-height: 600px; max-height: 720px; overflow-y: auto; padding: 26px 30px; border: 1px solid #cbd6dd; border-radius: 13px; background: #fff; }
 .preview-label { display: inline-block; margin-bottom: 17px; padding: 4px 9px; border-radius: 7px; color: #26647f; background: #e7f2f6; font-size: 10px; font-weight: 800; }
-.privacy-preview h3 { margin: 0 0 18px; font-size: 20px; }
+.privacy-preview h2 { margin: 0 0 18px; font-size: 20px; }
+.privacy-preview h3 { margin: 18px 0 4px; font-size: 16px; }
 .privacy-preview p { margin: 0; color: #405768; font-size: 13px; line-height: 1.8; }
 .privacy-side { display: grid; gap: 14px; }
 .publish-card { padding: 22px; }
