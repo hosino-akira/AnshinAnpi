@@ -1,6 +1,8 @@
 # Android 利用者端末の API 連携（簡略版）
 
-版：0.4.0。バックエンドのアドレス：`http://192.168.0.51:3002`。IP アドレスが変わった場合は接続先も更新してください。
+版：0.4.0。本番バックエンドの Origin：`https://anshin.info`。API の接続先：`https://anshin.info/v1`。管理画面：`https://anshin.info/admin`。
+
+以下の表は `/v1` を含むパスを記載しています。例えば端末情報の取得先は `https://anshin.info/v1/terminal` です。API の接続先に `/v1` を設定したクライアントでは、パスに `/v1` を重ねないでください。
 
 ## 要求の規約
 
@@ -13,7 +15,7 @@ POST / DELETE には Content-Type: application/json と Idempotency-Key: <今回
 
 ## 登録の順序
 
-登録が完了した `active` の利用者だけを登録済みと扱います。登録①で既存の `active` の利用者と高い類似度で一致した場合は HTTP 409、`error.code=FACE_ALREADY_REGISTERED` を返し、`temp_id` は返しません。登録③でも登録済みか再確認し、氏名が異なっていても重複登録は許可しません。`pending_registration`、写真撮影だけの記録、途中で中止した記録は再登録を妨げず、安否確認の顔認証にも使用しません。2 回目の登録確認では今回の `user_id` だけを照合するため、ほかの未完了の記録の影響は受けません。登録確認が成功し、すべての通知がメールサーバーに受理されてから状態が `active` になります。フロントエンドで `FACE_ALREADY_REGISTERED` を受け取った場合は「登録済みです。「登録済み」の手順を選択してください」と案内します。この応答に既存の利用者の氏名や ID は含めません。
+登録が完了した `active` の利用者だけを登録済みと扱います。登録①で既存の `active` の利用者と高い類似度で一致した場合は HTTP 409、`error.code=FACE_ALREADY_REGISTERED` を返し、`temp_id` は返しません。登録③では登録①で確認済みの写真をそのまま保存し、重複検索を繰り返しません。初回撮影から保存までの間に別の操作で同じ顔の登録が完了しても、登録③では再検出しません。`pending_registration`、写真撮影だけの記録、途中で中止した記録は再登録を妨げず、安否確認の顔認証にも使用しません。2 回目の登録確認では今回の `user_id` だけを照合するため、ほかの未完了の記録の影響は受けません。登録確認が成功し、すべての通知がメールサーバーに受理されてから状態が `active` になります。フロントエンドで `FACE_ALREADY_REGISTERED` を受け取った場合は「登録済みです。「登録済み」の手順を選択してください」と案内します。この応答に既存の利用者の氏名や ID は含めません。
 
 | 手順 | 要求 | 応答と画面の処理 |
 | --- | --- | --- |
@@ -43,7 +45,7 @@ consent=false は送信に同意しないことを示します。send_requested=
 
 ```http
 POST /v1/safety-notifications HTTP/1.1
-Host: 192.168.0.51:3002
+Host: anshin.info
 Content-Type: application/json
 Idempotency-Key: 11111111-1111-4111-8111-111111111111
 
@@ -69,12 +71,12 @@ Idempotency-Key: 11111111-1111-4111-8111-111111111111
 仮登録の取消：DELETE /v1/registrations/{temp_id}。
 登録後の操作の終了：DELETE /v1/sessions/current、本文 {"user_id":"..."}。
 終了時には画面の写真、氏名、連絡先、user_id を消去します。認証の有効期限が切れている場合は、画面の情報を消去するだけで構いません。
-ローカルのブラウザによる動作確認では /api/terminal/... を使用できます。Android はバックエンドの /v1/... を直接呼び出します。
+ローカルのブラウザによる動作確認では /api/terminal/... を使用できます。Android は本番バックエンドの `https://anshin.info/v1/...` を直接呼び出します。Android のネイティブ HTTP 通信にブラウザの CORS 設定は不要です。ブラウザや WebView の JavaScript から別の Origin で呼び出す場合は、実際の画面の Origin を伝え、バックエンドの CORS 設定を確認してください。
 
 ## 呼び出し例
 
 ```ts
-const api = createFaceClient();
+const api = createFaceClient('https://anshin.info/v1');
 const draft = await api.captureRegistration(photo);
 const policy = await api.registrationPolicy();
 const registered = await api.register({temp_id:draft.temp_id,display_name:name,recipients,

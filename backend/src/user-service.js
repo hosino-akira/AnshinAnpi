@@ -175,7 +175,10 @@ export class UserService {
         : await this.capture(request, body.liveness_session_id, 'enrollment', ctx, id);
       const { image } = captured;
       metrics = { ...captured.metrics, liveness_passed: captured.livenessPassed };
-      try { draft.image = image.toString('base64'); } finally { image.fill(0); }
+      try {
+        draft.image = image.toString('base64');
+        delete draft.duplicateCheckedAtCapture;
+      } finally { image.fill(0); }
     });
     return { ...result, body: { ...result.body, metrics } };
   }
@@ -191,10 +194,10 @@ export class UserService {
   const image = Buffer.from(draft.image, 'base64');
   let reference;
   try {
-    // Serialize the search/index/commit sequence across different registration requests.
-    // Only completed registrations prevent a new registration of the same face.
+    // Serialize face indexing and persistence. The current registration flow has
+    // already checked this photo at capture; legacy drafts still need that check.
     await ctx.db.query("SELECT pg_advisory_xact_lock(hashtextextended('anshin:face-registration', 0))");
-    await this.assertNewFace(ctx.db, image);
+    if (!draft.duplicateCheckedAtCapture) await this.assertNewFace(ctx.db, image);
     reference = await this.face.index(image, draft.userId);
   } finally { image.fill(0); }
   ctx.rollbacks.push(async () => {
@@ -223,7 +226,8 @@ export class UserService {
     try {
       await this.assertNewFace(ctx.db, captured.image, captured.metrics);
       await this.store.put('draft',id,{id,userId:randomUUID(),terminalId:request.terminal.terminal_id,
-        expiresAt,lastActivityAt:new Date().toISOString(),recipients:[],image:captured.image.toString('base64')},expiresAt);
+        expiresAt,lastActivityAt:new Date().toISOString(),recipients:[],image:captured.image.toString('base64'),
+        duplicateCheckedAtCapture:true},expiresAt);
     } finally {captured.image.fill(0);}
     ctx.rollbacks.push(() => this.store.remove('draft',id));
     await audit(ctx.db,this.config,request,'enrollment.captured','enrollment',id);

@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import AdminConsole from "@/components/admin/admin-console";
+import "./admin.css";
 
 // 管理画面は利用者向けキオスク画面とは別のブラウザ用途として設定します。
 export const metadata: Metadata = {
@@ -16,5 +18,10 @@ export const viewport: Viewport = {
 };
 
 export default function AdminLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return children;
+  return (
+    <>
+      <AdminConsole />
+      {children}
+    </>
+  );
 }

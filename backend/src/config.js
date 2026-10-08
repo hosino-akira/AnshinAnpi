@@ -56,7 +56,7 @@ export async function readConfig(env = process.env) {
   if (!['local', 'kms'].includes(mode)) throw new Error('Invalid DATA_ENCRYPTION_MODE');
   if (production && mode !== 'kms') throw new Error('Production requires KMS encryption');
   if (mode === 'kms' && (!env.AWS_REGION || !env.AWS_KMS_KEY_ARN)) throw new Error('KMS region/key are required');
-  if (production && (!env.AWS_SECRET_ARN || !env.CORS_ORIGINS)) throw new Error('Production requires AWS_SECRET_ARN and explicit CORS_ORIGINS');
+  if (production && !env.CORS_ORIGINS) throw new Error('Production requires explicit CORS_ORIGINS');
   const config = {
     production, host: env.API_HOST ?? '127.0.0.1', port: Number(env.API_PORT ?? 3001),
     postgres: env.DATABASE_URL ? { connectionString: env.DATABASE_URL } : {

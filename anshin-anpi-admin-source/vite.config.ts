@@ -36,6 +36,10 @@ const localBindingConfig = {
 };
 
 export default defineConfig(async ({ command, mode }) => {
+  if (process.env.ANSHIN_BUILD_TARGET === "vps") {
+    return { plugins: [vinext()] };
+  }
+
   const localEnv = loadEnv(mode, process.cwd(), "ANSHIN_");
   const localFaceEnabled = command === "serve" && localEnv.ANSHIN_DEV_FACE_ENABLED === "true";
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool

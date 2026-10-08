@@ -1,0 +1,72 @@
+name: anshin-vps
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:17
+    command: ["postgres", "-c", "timezone=UTC", "-c", "log_timezone=UTC"]
+    restart: unless-stopped
+    mem_limit: 512m
+    shm_size: 128m
+    logging: *logging
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: anshin-anpi-api:${VPS_IMAGE_TAG:?Set VPS_IMAGE_TAG}
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    mem_limit: 512m
+    logging: *logging
+    env_file: ${VPS_ENV_FILE:-./deploy/vps/.env}
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=256
+      API_HOST: 0.0.0.0
+      API_PORT: 3001
+      DATA_ENCRYPTION_MODE: kms
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS}
+      AWS_REGION: ${AWS_REGION:?Set AWS_REGION}
+      AWS_KMS_KEY_ARN: ${AWS_KMS_KEY_ARN:?Set AWS_KMS_KEY_ARN}
+      AWS_EC2_METADATA_DISABLED: "true"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      API_DEBUG_LOG_ENABLED: "false"
+    ports:
+      - "127.0.0.1:3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  admin:
+    image: anshin-anpi-admin:${VPS_IMAGE_TAG:?Set VPS_IMAGE_TAG}
+    restart: unless-stopped
+    init: true
+    mem_limit: 384m
+    logging: *logging
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=256
+      HOST: 0.0.0.0
+      PORT: 3000
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  postgres_data:

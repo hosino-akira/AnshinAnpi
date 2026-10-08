@@ -20,6 +20,18 @@ Node.js 22.13.0以上を使用します。PostgreSQLを起動・初期化した�
 
 anshin-anpi-admin-sourceでnpm run devを実行し、/adminで管理画面、/で利用者画面を開きます。開発用の顔認識確認ページは/dev/faceです。
 
+管理画面の入口 `/admin` は `/admin/dashboard` へ転送します。未ログインの場合は `/admin/login` へ移動し、ログイン後は開こうとしていた画面へ戻ります。画面URLは `lib/admin-navigation.ts` に定義します。これらは表示する画面のアドレスで、管理APIの `/api/admin/...` とは別です。
+
+| 管理画面 | URL |
+|---|---|
+| ログイン | /admin/login |
+| 管理状況 | /admin/dashboard |
+| 登録者管理 | /admin/users |
+| メール送信先管理 | /admin/recipients |
+| 送信メール編集 | /admin/mail-template |
+| 個人情報取扱文面 | /admin/privacy |
+| 管理者情報 | /admin/profile |
+
 ブラウザの利用者API接続には.env.localでANSHIN_DEV_FACE_ENABLED=trueを指定し、ANSHIN_BACKEND_URLを実際のバックエンドアドレスに合わせます。既定値はhttp://127.0.0.1:3002です。Androidはバックエンドの/v1/...に直接接続します。
 
 npm run lintは静的検査、npm run buildは本番ビルドです。ビルド・インストール補助コマンドにはBash環境が必要です。APIのGET /health/readyは接続確認、GET /openapi.jsonは現在のAPI仕様を返します。
@@ -31,14 +43,17 @@ npm run lintは静的検査、npm run buildは本番ビルドです。ビルド�
 | app/page.tsx | 利用者画面SCR-00～SCR-14、画面遷移、カメラ、入力、タイマー |
 | app/globals.css | 全体配色、利用者画面と共通UIのスタイル |
 | app/layout.tsx | HTML、言語、タイトル、favicon、viewport |
-| app/admin/page.tsx | ログイン、管理状況、利用者、連絡先、メール、個人情報文案、管理者情報 |
+| app/admin/page.tsx | 管理画面の入口から管理状況への転送 |
+| app/admin/[section]/page.tsx | 管理ページのURL検証、未知のURLは404 |
+| components/admin/admin-console.tsx | ログインと各管理画面、URLに応じた表示と認証状態の維持 |
 | app/admin/admin.css | 管理画面の専用スタイル |
-| app/admin/layout.tsx | 管理画面のタイトルとviewport |
+| app/admin/layout.tsx | 管理画面のタイトル、viewportと共通画面のレイアウト |
 | app/dev/face/page.tsx | 写真を使う登録・顔認識APIの開発用確認画面 |
 | app/dev/face/face.css | 顔認識確認画面のスタイル |
 | lib/face-client.ts | ブラウザ利用者APIの入出力と呼び出し |
 | lib/face-api.ts | 利用者APIのHTTP処理、操作番号、エラー処理 |
 | lib/admin-api.ts | 管理APIのHTTP処理、Cookie、CSRF、エラー処理 |
+| lib/admin-navigation.ts | 管理ページのURL、ログイン後の遷移先の検証 |
 | lib/utils.ts | UI部品のclass名をまとめる共通処理 |
 | hooks/use-mobile.ts | sidebar部品が利用する画面幅判定 |
 | build/local-terminal-proxy.mjs | 開発時の/api/terminal/...をローカルバックエンドへ転送 |
