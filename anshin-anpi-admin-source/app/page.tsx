@@ -1740,12 +1740,8 @@ export default function Home() {
                 </span>
               </div>
               <div className="mail-body">
-                <p>
-                  {verifiedName}
-                  さんが、安否確認操作を行いました。
-                </p>
-                <p>
-                  本人の操作により送信された自動メールです。
+                <p style={{ whiteSpace: "pre-line" }}>
+                  {safetyContacts?.consent_body}
                 </p>
                 <small>
                   顔画像や顔特徴データはメールに含まれません。
@@ -1753,7 +1749,7 @@ export default function Home() {
               </div>
             </section>
             <Notice tone="info">
-              <span>{safetyContacts?.consent_body}</span>
+              <span style={{ whiteSpace: "pre-line" }}>{safetyContacts?.consent_body}</span>
             </Notice>
             <label
               className={`large-checkbox send-checkbox ${sendAgreed ? "is-checked" : ""}`}

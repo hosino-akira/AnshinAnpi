@@ -422,13 +422,16 @@ export class UserService {
     }
     await this.updateSession(session,{confirmed_at:new Date().toISOString()},ctx);
     const policy=await this.policy(ctx.db,'safety');
+    const user=(await ctx.db.query('SELECT display_name FROM users WHERE user_id=$1',[userId])).rows[0];
+    const displayName=await this.cipher.open(user.display_name,'user-name');
+    const consentBody=policy.body.replace(/\{\{登録者名\}\}/g,()=>displayName);
     const recipients=[];
     for (const row of (await ctx.db.query("SELECT * FROM recipients WHERE user_id=$1 AND status<>'deleted' ORDER BY order_no",[userId])).rows) {
       recipients.push({recipient_id:row.recipient_id,name:await this.cipher.open(row.name,'recipient-name'),
         masked_email:maskEmail(await this.cipher.open(row.encrypted_email,'recipient-email')),status:row.status});
     }
     await audit(ctx.db,this.config,request,'identity.confirmed','session',session.session_id);
-    return {body:{success:true,confirmed:true,user_id:userId,recipients,consent_body:policy.body,policy_version:policy.policy_version}};
+    return {body:{success:true,confirmed:true,user_id:userId,recipients,consent_body:consentBody,policy_version:policy.policy_version}};
   }
   async notifySafety(request,body,ctx) {
     const session=await this.session(request,ctx.db,'safety',{confirmed:true});

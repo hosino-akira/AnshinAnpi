@@ -10,10 +10,11 @@
   },
   {
     "consent_type": "safety",
-    "policy_version": "dev-v1",
-    "title": "開発確認用同意文面",
-    "body": "【開発確認用・正式運用不可】表示された送信先へ、ご本人が安否確認操作を行ったことをメールで通知することに同意します。送信受付は受信・閲覧を保証しません。本サービスは緊急通報ではありません。",
+    "policy_version": "safety-v1",
+    "title": "安否確認メールの送信内容",
+    "body": "{{登録者名}}さんが、安否確認操作を行いました。\n本人の操作により送信された自動メールです。",
     "status": "published",
-    "requires_reconsent": false
+    "requires_reconsent": false,
+    "effective_date": "2026-10-08"
   }
 ]

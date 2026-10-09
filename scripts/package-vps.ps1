@@ -23,7 +23,7 @@ try {
 
     New-Item -ItemType Directory -Path "$releaseDirectory/deploy/vps", "$releaseDirectory/database" -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $projectRoot 'compose.production.yaml') -Destination $releaseDirectory
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'deploy/vps/env.example'), (Join-Path $projectRoot 'deploy/vps/anshin.info.conf') -Destination "$releaseDirectory/deploy/vps"
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'deploy/vps/env.example'), (Join-Path $projectRoot 'deploy/vps/anshin.info.conf'), (Join-Path $projectRoot 'deploy/vps/update-consent.sh') -Destination "$releaseDirectory/deploy/vps"
     Copy-Item -LiteralPath (Join-Path $projectRoot 'database/migrations') -Destination "$releaseDirectory/database" -Recurse
     & docker image save --output "$releaseDirectory/images.tar" $apiImage $adminImage
     Test-CommandExit

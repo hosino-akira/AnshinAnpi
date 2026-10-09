@@ -207,7 +207,7 @@ export default function FaceDevelopmentPage() {
     {identified && !checkId && <section className="face-card"><h2>安否確認メール</h2>
       {!safetyContacts && <button disabled={busy} onClick={() => void runMail('contacts')}>本人です。連絡先を取得</button>}
       {safetyContacts && <><ul>{safetyContacts.recipients.map(contact => <li key={contact.recipient_id}>{contact.name}：{contact.masked_email}</li>)}</ul>
-        <p>{safetyContacts.consent_body}</p>
+        <p style={{ whiteSpace: 'pre-line' }}>{safetyContacts.consent_body}</p>
         <label><input type="checkbox" checked={safetyConsent} onChange={e => setSafetyConsent(e.target.checked)}/>上記の連絡先に今回の安否確認通知を送信することに同意します</label>
         <button disabled={busy || !safetyConsent} onClick={() => void runMail('send')}>同意して安否確認メールを送信</button></>}
     </section>}
