@@ -41,8 +41,7 @@ export class MailWorker {
       const check = (await db.query('SELECT * FROM safety_checks WHERE check_id=$1 FOR UPDATE', [metadata.check_id])).rows[0];
       const delivery = (await db.query('SELECT * FROM mail_deliveries WHERE delivery_id=$1 FOR UPDATE', [id])).rows[0];
       if (!delivery || delivery.status !== 'sending' || delivery.provider !== this.mail.name) return;
-      // Historical queues can contain types removed from the specification.
-      if (check && !['registration', 'safety'].includes(check.check_type)) {
+      if (check && !['registration', 'safety', 'contact_change'].includes(check.check_type)) {
         await db.query(`UPDATE mail_deliveries SET status='cancelled',error_code='MAIL_TYPE_UNSUPPORTED',next_attempt_at=NULL WHERE delivery_id=$1`, [id]);
         await updateCheck(db, metadata.check_id);
         return;
@@ -51,8 +50,12 @@ export class MailWorker {
       const consent = check && (await db.query('SELECT * FROM consents WHERE consent_id=$1 FOR SHARE', [check.consent_id])).rows[0];
       const withdrawn = user && (await db.query(`SELECT 1 FROM consents WHERE user_id=$1 AND result='withdrawn'
         AND (consent_type='registration' OR consent_type=$2) AND consented_at >= $3 LIMIT 1`, [user.user_id, check?.check_type ?? 'safety', consent?.consented_at ?? new Date(0)])).rowCount;
+      // A contact registration notice does not authorize safety checks or resume service.
+      const userAllowed = check?.check_type === 'contact_change'
+        ? ['active','pending_registration','suspended'].includes(user?.status)
+        : user?.status === (check?.check_type === 'registration' && user?.status === 'pending_registration' ? 'pending_registration' : 'active');
       if (!user || !recipient || !check || !terminal || terminal.status !== 'active' || recipient.status !== 'active'
-        || user.status !== (check.check_type === 'registration' && user.status === 'pending_registration' ? 'pending_registration' : 'active')
+        || !userAllowed
         || Date.parse(check.expires_at) <= Date.now() || consent?.result !== 'granted' || withdrawn || delivery.snapshot_erased_at) {
         await db.query(`UPDATE mail_deliveries SET status='cancelled',error_code='SEND_AUTHORIZATION_EXPIRED' WHERE delivery_id=$1`, [id]);
         await updateCheck(db, metadata.check_id);
@@ -64,7 +67,7 @@ export class MailWorker {
           displayName: await this.cipher.open(user.display_name, 'user-name'),
           recipientName: await this.cipher.open(recipient.name, 'recipient-name'), facilityName: this.config.facilityName,
           occurredAt: check.check_type === 'registration' ? user.created_at : check.created_at,
-          timezone: terminal.timezone, type: check.check_type, deliveryId: id,
+          timezone: terminal.timezone, type: check.check_type === 'contact_change' ? 'registration' : check.check_type, deliveryId: id,
           template: check.check_type === 'safety' ? await safetyTemplate(db) : undefined });
         await db.query(`UPDATE mail_deliveries SET status='accepted',provider_message_id=$2,accepted_at=clock_timestamp(),error_code=NULL WHERE delivery_id=$1`, [id, result.messageId]);
         await audit(db, this.config, request, 'mail.accepted', 'delivery', id);
@@ -105,11 +108,13 @@ export class MailWorker {
     this.busy = true;
     try {
       if (Date.now() - this.lastMaintenance > 60000) {
-        await this.maintain(); await this.cleanFaces();
+        await this.maintain();
+        this.lastMaintenance = Date.now();
+        try { await this.cleanFaces(); }
+        catch (error) { this.logger?.error({ errorCode:error.code ?? 'FACE_CLEANUP_FAILED' }, 'face_cleanup_failed'); }
         // External features must be removed before the remaining DB references.
         await this.pool.query(`DELETE FROM users u WHERE status='deleted' AND purge_after<=clock_timestamp()
           AND NOT EXISTS(SELECT 1 FROM face_templates f WHERE f.user_id=u.user_id AND f.status<>'deleted')`);
-        this.lastMaintenance = Date.now();
       }
       if (this.mail.ready) {
         for (let i = 0; i < 4; i++) { const id = await this.claim(); if (!id) break; await this.deliver(id); }
@@ -117,6 +122,7 @@ export class MailWorker {
     } finally { this.busy = false; }
   }
   start(logger) {
+    this.logger = logger;
     this.timer = setInterval(() => this.tick().catch(() => logger.error({ errorCode: 'WORKER_FAILED' }, 'worker_failed')), 1000);
     this.timer.unref();
   }

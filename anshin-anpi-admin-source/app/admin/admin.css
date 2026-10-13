@@ -436,7 +436,7 @@
 .privacy-meta span { font-size: 10px; line-height: 1.35; }
 .privacy-meta strong { color: var(--admin-text); font-size: 11px; }
 .privacy-actions button { min-height: 40px; border-radius: 10px; font-size: 12px; }
-.admin-primary { color: #fff !important; background: var(--admin-red) !important; }
+.admin-primary { color: #fff !important; background: var(--admin-red, #df0e12) !important; }
 .admin-primary:hover { background: #c40c10 !important; }
 .privacy-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(280px, .45fr); gap: 16px; align-items: start; }
 .privacy-editor { min-width: 0; padding: 20px; }
@@ -643,3 +643,8 @@
 .admin-data-controls { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
 .face-reenroll { padding: 14px; border: 1px solid #ccd8df; border-radius: 8px; }
 .face-reenroll details p { white-space: pre-wrap; line-height: 1.8; }
+.face-photo-picker { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 42px; padding: 5px 10px; border: 1px solid #b8c8d2; border-radius: 10px; background: #fff; font-size: 13px; }
+.face-photo-picker:focus-within { outline: 2px solid #315f79; outline-offset: 2px; }
+.face-photo-button { flex: 0 0 auto; padding: 5px 8px; border-radius: 6px; background: #eef3f6; font-weight: 600; }
+.face-photo-filename { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.face-photo-picker .face-photo-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }

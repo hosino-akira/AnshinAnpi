@@ -96,6 +96,7 @@ import {
   type Policy,
 } from "@/lib/admin-api";
 import Link from "next/link";
+import { activityText, activityTime } from "@/lib/admin-activity";
 import { usePathname, useRouter } from "next/navigation";
 import {
   ADMIN_LOGIN_PATH,
@@ -280,6 +281,7 @@ export default function AdminConsole() {
   const explicitLogout = useRef(false);
   const [isAuthenticated, setIsAuthenticated] =
     useState(false);
+  const [sessionExpiresAt, setSessionExpiresAt] = useState("");
   const [adminAccount, setAdminAccount] =
     useState<AdminAccount>(INITIAL_ADMIN);
   const [adminDraft, setAdminDraft] = useState({
@@ -309,6 +311,7 @@ export default function AdminConsole() {
   >("all");
   const [editingUser, setEditingUser] =
     useState<RegisteredUser | null>(null);
+  const [showFaceReenroll, setShowFaceReenroll] = useState(false);
   const [formError, setFormError] = useState("");
   const [deleteTarget, setDeleteTarget] =
     useState<DeleteTarget>(null);
@@ -337,9 +340,12 @@ export default function AdminConsole() {
     "edit" | "preview"
   >("edit");
   const [privacySavedAt, setPrivacySavedAt] = useState("—");
-  const [activities, setActivities] = useState(
-    [] as string[],
-  );
+  const [activities, setActivities] = useState<Dashboard["activities"]>([]);
+  const [activityNow, setActivityNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setActivityNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const [flash, setFlash] = useState<FlashMessage>(null);
   const [isInteractive, setIsInteractive] = useState(false);
 
@@ -349,6 +355,7 @@ export default function AdminConsole() {
   const [ownerPresent, setOwnerPresent] = useState(false);
   const [faceConsent, setFaceConsent] = useState(false);
   const [faceImage, setFaceImage] = useState("");
+  const [faceFileName, setFaceFileName] = useState("");
   const [settings, setSettings] =
     useState<AdminSettings | null>(null);
   const [dashboard, setDashboard] =
@@ -414,22 +421,22 @@ export default function AdminConsole() {
     );
     if (policy) applyPolicy(policy);
     setPrivacySavedAt("データベースから取得");
-    setActivities(
-      summary.activities.map(
-        (x) => `${formatDate(x.occurred_at)} ${x.action}`,
-      ),
-    );
+    setActivities(summary.activities);
+    setActivityNow(Date.now());
   };
   const photoEpoch = useRef(0);
   const closeEditor = () => {
     photoEpoch.current++;
     setEditingUser(null);
+    setShowFaceReenroll(false);
     setFaceImage("");
+    setFaceFileName("");
     setOwnerPresent(false);
     setFaceConsent(false);
   };
   const clearSession = () => {
     setIsAuthenticated(false);
+    setSessionExpiresAt("");
     setUsers([]);
     closeEditor();
     setDeleteTarget(null);
@@ -461,6 +468,7 @@ export default function AdminConsole() {
       .then(async (session) => {
         if (cancelled) return;
         setProfile(session.admin);
+        setSessionExpiresAt(session.expires_at);
         await loadData();
         if (!cancelled) setIsAuthenticated(true);
       })
@@ -480,6 +488,23 @@ export default function AdminConsole() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const expiresAt = Date.parse(sessionExpiresAt);
+    if (!isAuthenticated || !Number.isFinite(expiresAt)) return;
+    const expire = () => window.dispatchEvent(new Event("admin-session-expired"));
+    const checkExpiry = () => {
+      if (Date.now() >= expiresAt) expire();
+    };
+    const timer = window.setTimeout(expire, Math.max(0, expiresAt - Date.now()));
+    window.addEventListener("focus", checkExpiry);
+    document.addEventListener("visibilitychange", checkExpiry);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("focus", checkExpiry);
+      document.removeEventListener("visibilitychange", checkExpiry);
+    };
+  }, [isAuthenticated, sessionExpiresAt]);
 
   useEffect(() => {
     if (authChecking || !isKnownPage) return;
@@ -568,6 +593,7 @@ export default function AdminConsole() {
         },
       );
       setProfile(session.admin);
+      setSessionExpiresAt(session.expires_at);
       setLoginPassword("");
       await loadData();
       setIsAuthenticated(true);
@@ -649,8 +675,10 @@ export default function AdminConsole() {
   const openUserEditor = (user: RegisteredUser) => {
     setFormError("");
     setIdentityConfirmed(false);
+    setShowFaceReenroll(user.status === "suspended");
     photoEpoch.current++;
     setFaceImage("");
+    setFaceFileName("");
     setOwnerPresent(false);
     setFaceConsent(false);
     setEditingUser({
@@ -754,6 +782,7 @@ export default function AdminConsole() {
           ?.faceStatus === "registered";
       const result = await adminApi<{
         user: RegisteredUser;
+        registration_mail_count: number;
       }>(`/users/${editingUser.id}`, "PUT", {
         name: trimmedName,
         status: editingUser.status,
@@ -774,11 +803,14 @@ export default function AdminConsole() {
       });
       await loadData();
       setEditingUser(resetFace ? result.user : null);
+      if (resetFace) setShowFaceReenroll(true);
       setIdentityConfirmed(false);
       showFlash(
         "success",
         resetFace
           ? "旧顔データを無効化しました。本人立会いで顔を再登録してください。"
+          : result.registration_mail_count > 0
+            ? `登録者情報を保存し、${result.registration_mail_count}件の登録確認メールの送信を受け付けました`
           : "登録者情報を保存しました",
       );
     } catch (error) {
@@ -1602,10 +1634,15 @@ export default function AdminConsole() {
                     </div>
                     <ol>
                       {activities.map((activity, index) => (
-                        <li key={`${activity}-${index}`}>
+                        <li key={activity.id ?? `${activity.action}-${activity.occurred_at}-${index}`}>
                           <span />
                           <div>
-                            <strong>{activity}</strong>
+                            <strong>{activityText(activity)}</strong>
+                            <small>
+                              <time dateTime={activity.occurred_at} title={formatDate(activity.occurred_at)}>
+                                {activityTime(activity.occurred_at, activityNow)}
+                              </time>
+                            </small>
                           </div>
                         </li>
                       ))}
@@ -2541,41 +2578,56 @@ export default function AdminConsole() {
                   </Button>
                 </section>
               )}
-              {editingUser.status === "suspended" &&
-                users.find((x) => x.id === editingUser.id)
-                  ?.faceStatus === "renewal" && (
+              {showFaceReenroll && (
                   <section className="face-reenroll">
                     <h3>本人立会いで顔を再登録</h3>
                     <p>
                       顔写真は一時的に処理し、原画像を保存しません。
                     </p>
-                    <Input
-                      type="file"
-                      accept="image/jpeg,image/png"
-                      onChange={(event) => {
-                        const file =
-                          event.target.files?.[0];
-                        setFaceImage("");
-                        if (!file) return;
-                        if (file.size > 512 * 1024) {
-                          setFormError(
-                            "写真は512 KiB以下にしてください。",
-                          );
-                          return;
-                        }
-                        const reader = new FileReader();
-                        const epoch = photoEpoch.current;
-                        reader.onload = () => {
-                          if (photoEpoch.current === epoch)
-                            setFaceImage(
-                              String(reader.result).split(
-                                ",",
-                              )[1] ?? "",
+                    <div className="face-photo-picker">
+                      <span className="face-photo-button" aria-hidden="true">
+                        ファイルを選択
+                      </span>
+                      <span
+                        id="face-photo-filename"
+                        className="face-photo-filename"
+                        aria-live="polite"
+                        title={faceFileName || undefined}
+                      >
+                        {faceFileName || "ファイルが選択されていません"}
+                      </span>
+                      <Input
+                        className="face-photo-input"
+                        type="file"
+                        accept="image/jpeg,image/png"
+                        aria-label="顔写真を選択"
+                        aria-describedby="face-photo-filename"
+                        onChange={(event) => {
+                          const file =
+                            event.target.files?.[0];
+                          setFaceImage("");
+                          setFaceFileName(file?.name ?? "");
+                          if (!file) return;
+                          if (file.size > 512 * 1024) {
+                            setFormError(
+                              "写真は512 KiB以下にしてください。",
                             );
-                        };
-                        reader.readAsDataURL(file);
-                      }}
-                    />
+                            return;
+                          }
+                          const reader = new FileReader();
+                          const epoch = photoEpoch.current;
+                          reader.onload = () => {
+                            if (photoEpoch.current === epoch)
+                              setFaceImage(
+                                String(reader.result).split(
+                                  ",",
+                                )[1] ?? "",
+                              );
+                          };
+                          reader.readAsDataURL(file);
+                        }}
+                      />
+                    </div>
                     <label className="admin-confirm">
                       <input
                         type="checkbox"
@@ -2592,15 +2644,15 @@ export default function AdminConsole() {
                       <summary>
                         現在の個人情報取扱文面
                       </summary>
-                      <p>
-                        {
+                      <PolicyContent
+                        body={
                           settings?.policies.find(
                             (x) =>
                               x.consent_type ===
                               "registration",
-                          )?.body
+                          )?.body ?? ""
                         }
-                      </p>
+                      />
                     </details>
                     <label className="admin-confirm">
                       <input
@@ -2765,6 +2817,7 @@ export default function AdminConsole() {
               onClick={saveUser}
               disabled={busy}
             >
+              <ShieldCheck aria-hidden="true" />
               変更を保存
             </Button>
           </SheetFooter>

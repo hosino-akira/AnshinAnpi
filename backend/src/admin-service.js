@@ -98,6 +98,22 @@ export class AdminService {
     await db.query(`UPDATE recipients SET status='deleted',name=$2,encrypted_email=$3 WHERE recipient_id=$1`,
       [id,await this.cipher.seal('削除済み','recipient-name'),await this.cipher.seal('','recipient-email')]);
   }
+  async queueRecipientRegistration(db, user, recipients, request) {
+    if (!recipients.length) return 0;
+    if (!this.mail.ready) fail(503,'SERVICE_NOT_CONFIGURED','登録確認メールを送るため、メール設定が必要です。');
+    const terminalId = user.terminal_id ?? (await db.query("SELECT terminal_id FROM terminals WHERE status='active' ORDER BY created_at LIMIT 1")).rows[0]?.terminal_id;
+    const consent = (await db.query("SELECT consent_id FROM consents WHERE user_id=$1 AND consent_type='registration' AND result='granted' ORDER BY consented_at DESC LIMIT 1",[user.user_id])).rows[0];
+    if (!consent) fail(409,'REGISTRATION_CONSENT_REQUIRED','登録時の同意記録を確認してください。');
+    const key = `admin-contact:${sha256(canonical({ userId:user.user_id, key:request.headers['idempotency-key'] })).toString('hex')}`;
+    const check = (await db.query(`INSERT INTO safety_checks(user_id,terminal_id,check_type,verified_at,idempotency_key,request_sha256,consent_id,expires_at)
+      VALUES($1,$2,'contact_change',clock_timestamp(),$3,$4,$5,clock_timestamp()+interval '15 minutes') RETURNING check_id`,
+      [user.user_id,terminalId,key,sha256(canonical(request.body)),consent.consent_id])).rows[0];
+    for (const recipient of recipients) await db.query(`INSERT INTO mail_deliveries(check_id,user_id,recipient_id,recipient_order_no,encrypted_email_snapshot,provider,next_attempt_at)
+      VALUES($1,$2,$3,$4,$5,$6,clock_timestamp())`,
+      [check.check_id,user.user_id,recipient.recipient_id,recipient.order_no,recipient.encrypted_email,this.mail.name]);
+    await audit(db,this.config,request,'mail.queued','safety_check',check.check_id);
+    return recipients.length;
+  }
   async updateUser(request, body) {
     return transaction(this.pool, async db => {
       const user = await this.user(db,request.params.id,body.expected_revision);
@@ -106,18 +122,28 @@ export class AdminService {
       const existing = (await db.query("SELECT * FROM recipients WHERE user_id=$1 AND status<>'deleted' ORDER BY order_no FOR UPDATE",[user.user_id])).rows;
       const ids = body.recipients.filter(x=>x.id).map(x=>x.id);
       if (new Set(ids).size !== ids.length || ids.some(id=>!existing.some(x=>x.recipient_id===id))) fail(400,'VALIDATION_ERROR','送信先を再読み込みしてください。');
+      const nameChanged = await this.cipher.open(user.display_name,'user-name') !== body.name;
+      let recipientsChanged = existing.length !== body.recipients.length;
+      for (const [index,recipient] of body.recipients.entries()) {
+        const old = existing[index];
+        if (!old || old.recipient_id !== recipient.id ||
+          await this.cipher.open(old.name,'recipient-name') !== recipient.name ||
+          await this.cipher.open(old.encrypted_email,'recipient-email') !== recipient.email) recipientsChanged = true;
+      }
       for (const old of existing) if (!ids.includes(old.recipient_id)) await this.eraseRecipient(db,old.recipient_id);
       // Temporarily free the two order slots, then restore selected recipients atomically.
       await db.query("UPDATE recipients SET status='deleted' WHERE user_id=$1 AND status<>'deleted'",[user.user_id]);
+      const changedRecipients = [];
       for (const [index,recipient] of body.recipients.entries()) {
         const old = existing.find(x=>x.recipient_id===recipient.id);
         const addressChanged = !old || await this.cipher.open(old.encrypted_email,'recipient-email') !== recipient.email;
         if (old && addressChanged) await this.cancelRecipient(db,old.recipient_id);
         const values = [user.user_id,await this.cipher.seal(recipient.name,'recipient-name'),await this.cipher.seal(recipient.email,'recipient-email'),index+1];
-        if (old) await db.query(`UPDATE recipients SET name=$2,encrypted_email=$3,order_no=$4,
-          status=$5,bounce_count=CASE WHEN $6 THEN 0 ELSE bounce_count END WHERE recipient_id=$1`,
-          [old.recipient_id,...values.slice(1),addressChanged ? 'active' : old.status,addressChanged]);
-        else await db.query('INSERT INTO recipients(user_id,name,encrypted_email,order_no) VALUES($1,$2,$3,$4)',values);
+        const saved = old ? await db.query(`UPDATE recipients SET name=$2,encrypted_email=$3,order_no=$4,
+          status=$5,bounce_count=CASE WHEN $6 THEN 0 ELSE bounce_count END WHERE recipient_id=$1 RETURNING *`,
+          [old.recipient_id,...values.slice(1),addressChanged ? 'active' : old.status,addressChanged])
+          : await db.query('INSERT INTO recipients(user_id,name,encrypted_email,order_no) VALUES($1,$2,$3,$4) RETURNING *',values);
+        if (addressChanged) changedRecipients.push(saved.rows[0]);
       }
       const targetStatus = body.reset_face ? 'suspended' : body.status;
       if (targetStatus === 'active' && !(await db.query("SELECT 1 FROM face_templates WHERE user_id=$1 AND status='active'",[user.user_id])).rowCount)
@@ -127,8 +153,15 @@ export class AdminService {
       await db.query(`UPDATE users SET display_name=$2,status=$3::varchar,suspended_at=CASE WHEN $3::varchar='suspended' THEN clock_timestamp() ELSE NULL END WHERE user_id=$1`,
         [user.user_id,await this.cipher.seal(body.name,'user-name'),targetStatus]);
       if (body.reset_face) await db.query("UPDATE face_templates SET status='revoked' WHERE user_id=$1 AND status='active'",[user.user_id]);
-      await audit(db,this.config,request,body.reset_face ? 'admin.face.reset' : 'admin.user.updated','user',user.user_id);
-      return { user: await this.serialize(db,await this.user(db,user.user_id)) };
+      const action = body.reset_face ? 'admin.face.reset'
+        : user.status !== targetStatus && targetStatus === 'suspended' ? 'admin.user.suspended'
+        : user.status !== targetStatus && targetStatus === 'active' ? 'admin.user.resumed'
+        : recipientsChanged && !nameChanged && user.status === targetStatus ? 'admin.recipient.updated'
+        : 'admin.user.updated';
+      await audit(db,this.config,request,action,'user',user.user_id);
+      const savedUser = await this.user(db,user.user_id);
+      const registrationMailCount = await this.queueRecipientRegistration(db,savedUser,changedRecipients,request);
+      return { user: await this.serialize(db,savedUser), registration_mail_count:registrationMailCount };
     });
   }
   async deleteUser(request, body) {
@@ -220,7 +253,21 @@ export class AdminService {
           email:d.encrypted_email_snapshot ? await this.cipher.open(d.encrypted_email_snapshot,'recipient-email') : '消去済み',
           occurredAt:d.updated_at,code:d.error_code ?? d.status,status:d.status });
       }
-      const activities=(await db.query("SELECT action,occurred_at FROM audit_logs WHERE actor_type='admin' AND action NOT LIKE '%.read' AND action<>'admin.login' ORDER BY log_id DESC LIMIT 5")).rows;
+      const activities=[];
+      const recent=(await db.query(`SELECT a.log_id::text AS id,a.action,a.occurred_at,a.target_id,u.display_name
+        FROM (SELECT log_id,action,occurred_at,target_type,target_id FROM audit_logs
+          WHERE actor_type='admin' AND action NOT LIKE '%.read' AND action<>'admin.login'
+          ORDER BY log_id DESC LIMIT 5) a
+        LEFT JOIN recipients r ON a.target_type='recipient' AND r.recipient_id::text=a.target_id
+        LEFT JOIN users u ON u.user_id::text=CASE WHEN a.target_type='user' THEN a.target_id
+          WHEN a.target_type='recipient' THEN r.user_id::text END AND u.status<>'deleted'
+        ORDER BY a.log_id DESC`)).rows;
+      for (const row of recent) activities.push({
+        id:row.id,action:row.action,occurred_at:row.occurred_at,
+        user_name:row.display_name ? await this.cipher.open(row.display_name,'user-name') : null,
+        policy_version:row.action==='admin.policy.published' && row.target_id?.startsWith('policy.registration.')
+          ? row.target_id.slice('policy.registration.'.length) : null,
+      });
       await audit(db,this.config,request,'admin.dashboard.read','dashboard',null);
       return { counts:Object.fromEntries(Object.entries(counts).map(([key,value])=>[key,Number(value)])),errors,activities };
     });
@@ -299,7 +346,7 @@ export async function registerAdmin(app,deps) {
       });
     };
     api.post('/v1/admin/login',async (request,reply)=>service.auth.login(request,adminSchemas.login.parse(request.body),reply));
-    api.get('/v1/admin/session',request=>({admin:adminProfile(request.admin),csrf_token:request.adminSession.csrf}));
+    api.get('/v1/admin/session',request=>({admin:adminProfile(request.admin),csrf_token:request.adminSession.csrf,expires_at:request.adminSession.expires_at}));
     api.post('/v1/admin/logout',mutate(null,async(request,body,reply)=> {
       await service.log(request,'admin.logout');
       await deps.store.remove('admin-session',request.adminSession.key);

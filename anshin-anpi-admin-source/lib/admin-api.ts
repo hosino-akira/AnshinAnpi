@@ -43,7 +43,7 @@ export async function adminApi<T>(path: string, method = 'GET', body?: unknown):
   if (path === '/logout' || result.reauthenticate) csrfToken = '';
   return result as T;
 }
-export type AdminSession = { admin: { name: string; email: string; last_login_at: string | null; last_login_ip: string | null }; csrf_token: string };
+export type AdminSession = { admin: { name: string; email: string; last_login_at: string | null; last_login_ip: string | null }; csrf_token: string; expires_at: string };
 export type AdminSettings = {
   mail: { subject: string; body: string; revision: string; updated_at: string };
   policies: Policy[]; history: Policy[];
@@ -51,5 +51,5 @@ export type AdminSettings = {
 export type Policy = { consent_type: 'registration' | 'safety'; policy_version: string; title: string; body: string; effective_date: string; requires_reconsent: boolean };
 export type Dashboard = { counts: { users: number; active: number; recipients: number; today: number; accepted: number; errors: number };
   errors: { id: string; userId: string; userName: string; recipientName: string; email: string; occurredAt: string; code: string; status: string }[];
-  activities: { action: string; occurred_at: string }[];
+  activities: { id?: string; action: string; occurred_at: string; user_name?: string | null; policy_version?: string | null }[];
 };

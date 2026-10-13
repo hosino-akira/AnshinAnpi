@@ -20,11 +20,12 @@ export async function passwordMatches(password, encoded) {
 export const adminProfile = row => ({ name: row.name, email: row.email,
   last_login_at: row.last_login_at, last_login_ip: row.last_login_ip });
 export const COOKIE_NAME = 'anshin_admin';
+const SESSION_TTL_SECONDS = 24 * 60 * 60;
 
 export class AdminAuth {
   constructor(deps) { Object.assign(this, deps); }
   cookie(value, clear = false) {
-    return `${COOKIE_NAME}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${clear ? 0 : 28800}${this.config.production ? '; Secure' : ''}`;
+    return `${COOKIE_NAME}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${clear ? 0 : SESSION_TTL_SECONDS}${this.config.production ? '; Secure' : ''}`;
   }
   origin(request) {
     // Browser requests must match the configured frontend origins. CLI requests have no Origin.
@@ -59,11 +60,11 @@ export class AdminAuth {
     });
     if (result.error) fail(result.status, result.error, result.status === 503 ? '管理者の初期設定が必要です。' : 'ログインできません。入力内容を確認するか、しばらく待って再試行してください。');
     const raw = token(), sessionKey = sha256(raw).toString('hex');
-    const expiry = new Date(Date.now() + 8 * 3600000).toISOString();
+    const expiry = new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString();
     const csrf = token();
-    await this.store.put('admin-session', sessionKey, { auth_version: result.auth_version, csrf, expires_at: expiry, last_activity: Date.now() }, expiry);
+    await this.store.put('admin-session', sessionKey, { auth_version: result.auth_version, csrf, expires_at: expiry }, expiry);
     reply.header('Set-Cookie', this.cookie(raw));
-    return { admin: adminProfile(result), csrf_token: csrf };
+    return { admin: adminProfile(result), csrf_token: csrf, expires_at: expiry };
   }
   async authenticate(request, mutate = false) {
     this.origin(request);
@@ -71,15 +72,14 @@ export class AdminAuth {
     if (!raw || !/^[A-Za-z0-9_-]{43}$/.test(raw)) fail(401, 'ADMIN_SESSION_REQUIRED', '管理者としてログインしてください。');
     const key = sha256(raw).toString('hex');
     const session = await this.store.get('admin-session', key);
+    const expiresAt = session ? Date.parse(session.expires_at) : NaN;
     const row = session && (await this.pool.query('SELECT name,email,last_login_at,last_login_ip,auth_version FROM app_meta.administrator WHERE singleton')).rows[0];
-    if (!session || !row || row.auth_version !== session.auth_version || Date.now() - session.last_activity > 15 * 60000) {
+    if (!session || !row || row.auth_version !== session.auth_version || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
       await this.store.remove('admin-session', key);
       fail(401, 'ADMIN_SESSION_REQUIRED', 'ログインの有効期限が切れました。');
     }
     if (mutate && (typeof request.headers['x-csrf-token'] !== 'string' || !equal(request.headers['x-csrf-token'], session.csrf)))
       fail(403, 'ADMIN_CSRF_REQUIRED', '画面を再読み込みしてください。');
-    session.last_activity = Date.now();
-    await this.store.put('admin-session', key, session, session.expires_at);
     request.admin = row; request.adminSession = { ...session, key };
     return row;
   }
