@@ -491,7 +491,8 @@
 .account-form-head p { margin: 0 0 4px; color: var(--admin-red); font-size: .75rem; font-weight: 900; letter-spacing: .15em; }
 .account-form-head h2 { margin: 0; font-size: 1.35rem; }
 .account-form-head > svg { width: 28px; height: 28px; color: var(--admin-green); }
-.admin-account-form > section { padding: 22px 24px; border-bottom: 1px solid #e0e7eb; }
+.admin-account-form > form > section { padding: 22px 24px; border-bottom: 1px solid #e0e7eb; }
+.admin-password-form { border-top: 1px solid #e0e7eb; }
 .admin-account-form h3 { margin: 0 0 14px; font-size: 1rem; }
 .account-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .account-fields > div { min-width: 0; display: grid; gap: 6px; }

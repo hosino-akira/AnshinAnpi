@@ -23,7 +23,9 @@ export function activityText(activity: Dashboard["activities"][number]): string 
     case "admin.template.updated":
       return "送信メールのタイトルと本文を更新しました";
     case "admin.profile.updated":
-      return "管理者情報を更新しました";
+      return "管理者の基本情報を更新しました";
+    case "admin.password.updated":
+      return "管理者のパスワードを変更しました";
     case "admin.face.reset":
       return `${user}を顔の再登録待ちに変更しました`;
     case "admin.face.reenrolled":

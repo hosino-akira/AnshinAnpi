@@ -7,7 +7,7 @@
 - メールアドレス：`admin@anshin-anpi.jp`
 - 名前：`安心施設 管理者`
 - 初期のランダムなパスワードは Git の対象外の `backend/.admin-setup.json` に保存します。初期設定ツールは認証情報をログに出力しません。
-- メールアドレスとパスワードでログインします。パスワード管理ツールに保存した後、初期設定ファイルを削除してください。プロジェクト所有者の最新の指定により、多要素認証は使用しません。管理者パスワードは入力必須ですが、長さ・文字種・組合せの制約は設けません。変更時の現在のパスワード確認と確認欄の一致検証は継続します。
+- メールアドレスとパスワードでログインします。パスワード管理ツールに保存した後、初期設定ファイルを削除してください。プロジェクト所有者の最新の指定により、多要素認証は使用しません。管理者パスワードは入力必須ですが、長さ・文字種・組合せの制約は設けません。基本情報とパスワードは別のフォームで保存します。基本情報の保存はパスワード入力不要です。パスワード変更時は現在のパスワード確認と確認欄の一致を検証します。
 
 新しい環境ではデータベースのマイグレーションを適用してから `npm run provision:admin` を実行します。既存のアカウントは上書きしません。パスワードを紛失した場合は、サーバーへのアクセス権があるローカル端末で `npm run provision:admin -- --reset` を実行してください。新しいパスワードを生成し、すべての旧セッションを失効させ、監査記録に残します。インターネット経由のパスワード復旧 API は提供しません。
 
@@ -28,7 +28,8 @@
 | POST `/login` | メールアドレスとパスワードによるログイン、セッション作成 |
 | GET `/session` | 管理者情報と CSRF トークンの取得 |
 | POST `/logout` | セッションの失効と Cookie の消去 |
-| PUT `/profile` | 名前、メールアドレス、パスワードの変更。現在のパスワードを再確認し、保存後にすべてのセッションを失効させる |
+| PUT `/profile` | 名前とメールアドレスのみ変更。現在のパスワードは不要で、保存後もログインを継続する |
+| PUT `/password` | 現在のパスワードを確認し、新しいパスワードへ変更。保存後にすべての旧セッションを失効させる |
 | GET `/dashboard` | 実際の登録者数、連絡先数、東京時間の当日統計、メールエラー、直近の操作 |
 | GET `/users?limit=200&offset=0` | 登録者と連絡先をページ単位で取得。小さな顔サムネイルを含み、元の写真や顔の特徴量は返さない |
 | POST `/users/search` | 氏名の完全一致検索。用途 reason の記録が必須 |
@@ -52,7 +53,8 @@
 | POST `/login` | `email`, `password` | `admin`, `csrf_token`, `expires_at`。`anshin_admin` Cookie を設定 |
 | GET `/session` | なし | `admin`, `csrf_token`, `expires_at` |
 | POST `/logout` | `{}` | `logged_out: true`。Cookie を消去 |
-| PUT `/profile` | `name`, `email`, `current_password`。任意：`new_password`（空欄は変更なし。長さ・文字種・組合せの制約なし） | `admin`, `reauthenticate: true`。すべての旧セッションを失効 |
+| PUT `/profile` | `name`, `email` | `admin`, `reauthenticate: false`。パスワードとセッション有効期限は変更しない |
+| PUT `/password` | `current_password`, `new_password`。いずれも入力必須、長さ・文字種・組合せの制約なし | `saved: true`, `reauthenticate: true`。すべての旧セッションを失効 |
 | GET `/dashboard` | なし | `counts`, `errors`, `activities` |
 | GET `/users` | 任意のクエリ：`limit`（1～200、既定値 100）, `offset`（0～100000、既定値 0） | `users`, `total`, `offset`, `limit` |
 | POST `/users/search` | `name`, `reason`。氏名全体で検索 | `users`, `total`, `offset`, `limit` |

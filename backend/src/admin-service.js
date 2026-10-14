@@ -16,7 +16,8 @@ const reason = z.enum(['support', 'correction', 'suspension', 'deletion', 'audit
 const contact = z.strictObject({ id: uuid.optional(), name: displayName, email });
 export const adminSchemas = {
   login: z.strictObject({ email, password }),
-  profile: z.strictObject({ name: displayName, email, current_password: password, new_password: password.optional() }),
+  profile: z.strictObject({ name: displayName, email }),
+  passwordChange: z.strictObject({ current_password: password, new_password: password }),
   user: z.strictObject({ name: displayName, status: z.enum(['active','suspended','pending_registration']),
     recipients: z.array(contact).min(1).max(2).refine(rows => new Set(rows.map(x => x.email)).size === rows.length, 'Duplicate recipients'),
     expected_revision: revision, identity_confirmed: z.literal(true), reset_face: z.boolean().default(false), reason }),
@@ -36,7 +37,8 @@ export const adminRoutes = [
   ['post','/v1/admin/login','管理者のメールアドレスとパスワードによるログイン','login'],
   ['get','/v1/admin/session','管理者セッションと CSRF トークンの取得'],
   ['post','/v1/admin/logout','管理者セッションの終了'],
-  ['put','/v1/admin/profile','唯一の管理者アカウントの変更とパスワードの再確認','profile'],
+  ['put','/v1/admin/profile','管理者の名前とメールアドレスの変更','profile'],
+  ['put','/v1/admin/password','現在のパスワードを確認してパスワードを変更','passwordChange'],
   ['get','/v1/admin/dashboard','統計と直近のメールエラー'],
   ['get','/v1/admin/users','登録者と連絡先の一覧をページ単位で取得'],
   ['post','/v1/admin/users/search','氏名の完全一致検索と用途の記録','search'],
@@ -52,6 +54,29 @@ export const adminRoutes = [
 
 export class AdminService {
   constructor(deps) { Object.assign(this, deps); this.auth = new AdminAuth(deps); }
+  async saveProfile(request, body) {
+    const profile = await transaction(this.pool, async db => {
+      const current = (await db.query('SELECT auth_version FROM app_meta.administrator WHERE singleton FOR UPDATE')).rows[0];
+      if (!current || current.auth_version !== request.adminSession.auth_version)
+        fail(401, 'ADMIN_SESSION_REQUIRED', '再ログインしてください。');
+      const row = (await db.query(`UPDATE app_meta.administrator SET name=$1,email=$2,updated_at=clock_timestamp()
+        WHERE singleton RETURNING *`, [body.name, body.email])).rows[0];
+      await audit(db, this.config, request, 'admin.profile.updated', 'administrator', 'singleton');
+      return adminProfile(row);
+    });
+    return { admin: profile, reauthenticate: false };
+  }
+  async changePassword(request, body, reply) {
+    await transaction(this.pool, async db => {
+      await this.auth.verifyCurrent(db, request, body.current_password);
+      await db.query(`UPDATE app_meta.administrator SET password_hash=$1,auth_version=auth_version+1,
+        updated_at=clock_timestamp() WHERE singleton`, [await passwordHash(body.new_password)]);
+      await audit(db, this.config, request, 'admin.password.updated', 'administrator', 'singleton');
+    });
+    await this.store.remove('admin-session', request.adminSession.key);
+    reply.header('Set-Cookie', this.auth.cookie('', true));
+    return { saved: true, reauthenticate: true };
+  }
   async log(request, action, target = 'administrator', id = 'singleton') {
     return transaction(this.pool, db => audit(db, this.config, request, action, target, id));
   }
@@ -358,16 +383,8 @@ export async function registerAdmin(app,deps) {
       await deps.store.remove('admin-session',request.adminSession.key);
       reply.header('Set-Cookie',service.auth.cookie('',true));return {logged_out:true};
     }));
-    api.put('/v1/admin/profile',mutate(adminSchemas.profile,async(request,body,reply)=> {
-      const profile=await transaction(deps.pool,async db=> {
-        await service.auth.verifyCurrent(db,request,body.current_password);
-        const row=(await db.query(`UPDATE app_meta.administrator SET name=$1,email=$2,password_hash=COALESCE($3,password_hash),
-          auth_version=auth_version+1,updated_at=clock_timestamp() WHERE singleton RETURNING *`,[body.name,body.email,body.new_password ? await passwordHash(body.new_password) : null])).rows[0];
-        await audit(db,deps.config,request,'admin.profile.updated','administrator','singleton'); return adminProfile(row);
-      });
-      await deps.store.remove('admin-session',request.adminSession.key);
-      reply.header('Set-Cookie',service.auth.cookie('',true)); return {admin:profile,reauthenticate:true};
-    }));
+    api.put('/v1/admin/profile',mutate(adminSchemas.profile,(request,body)=>service.saveProfile(request,body)));
+    api.put('/v1/admin/password',mutate(adminSchemas.passwordChange,(request,body,reply)=>service.changePassword(request,body,reply)));
     api.get('/v1/admin/dashboard',request=>service.dashboard(request));
     api.get('/v1/admin/users',request=>service.list(request));
     api.post('/v1/admin/users/search',mutate(adminSchemas.search,(request,body)=>service.list(request,body)));

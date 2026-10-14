@@ -319,6 +319,7 @@ export default function AdminConsole() {
   const [confirmPassword, setConfirmPassword] =
     useState("");
   const [adminFormError, setAdminFormError] = useState("");
+  const [passwordFormError, setPasswordFormError] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [users, setUsers] = useState<RegisteredUser[]>([]);
   const [query, setQuery] = useState("");
@@ -467,6 +468,8 @@ export default function AdminConsole() {
     setCurrentPassword("");
     setNewPassword("");
     setConfirmPassword("");
+    setAdminFormError("");
+    setPasswordFormError("");
   };
   useEffect(() => {
     let cancelled = false;
@@ -648,29 +651,45 @@ export default function AdminConsole() {
   ) => {
     event.preventDefault();
     if (busy) return;
+    setBusy(true);
+    setAdminFormError("");
+    try {
+      const result = await adminApi<{ admin: AdminSession["admin"] }>("/profile", "PUT", {
+        name: adminDraft.name.trim(),
+        email: adminDraft.email.trim(),
+      });
+      setProfile(result.admin);
+      showFlash("success", "基本情報を保存しました。");
+    } catch (error) {
+      setAdminFormError(errorText(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const saveAdminPassword = async (
+    event: FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+    if (busy) return;
     if (newPassword !== confirmPassword) {
-      setAdminFormError(
+      setPasswordFormError(
         "新しいパスワードを確認欄と一致させてください。",
       );
       return;
     }
     setBusy(true);
-    setAdminFormError("");
+    setPasswordFormError("");
     try {
-      await adminApi("/profile", "PUT", {
-        name: adminDraft.name.trim(),
-        email: adminDraft.email.trim(),
+      await adminApi("/password", "PUT", {
         current_password: currentPassword,
-        ...(newPassword
-          ? { new_password: newPassword }
-          : {}),
+        new_password: newPassword,
       });
       clearSession();
       setLoginError(
-        "管理者情報を保存しました。メールアドレスとパスワードで再ログインしてください。",
+        "パスワードを変更しました。新しいパスワードで再ログインしてください。",
       );
     } catch (error) {
-      setAdminFormError(errorText(error));
+      setPasswordFormError(errorText(error));
     } finally {
       setBusy(false);
     }
@@ -2258,9 +2277,8 @@ export default function AdminConsole() {
                   </span>
                 </div>
               </aside>
-              <form
+              <div
                 className="admin-card admin-account-form"
-                onSubmit={saveAdminAccount}
               >
                 <div className="account-form-head">
                   <div>
@@ -2269,6 +2287,7 @@ export default function AdminConsole() {
                   </div>
                   <ShieldCheck aria-hidden="true" />
                 </div>
+                <form onSubmit={saveAdminAccount}>
                 <section>
                   <h3>基本情報</h3>
                   <div className="account-fields">
@@ -2286,6 +2305,7 @@ export default function AdminConsole() {
                           }))
                         }
                         autoComplete="name"
+                        required
                       />
                     </div>
                     <div>
@@ -2303,16 +2323,37 @@ export default function AdminConsole() {
                           }))
                         }
                         autoComplete="email"
+                        required
                       />
                     </div>
                   </div>
                 </section>
+                {adminFormError && (
+                  <div className="account-form-error" role="alert">
+                    <CircleAlert aria-hidden="true" />
+                    {adminFormError}
+                  </div>
+                )}
+                <div className="account-form-actions">
+                  <Button type="button" variant="outline" disabled={busy} onClick={() => {
+                    setAdminDraft({ name: adminAccount.name, email: adminAccount.email });
+                    setAdminFormError("");
+                  }}>
+                    変更を取り消す
+                  </Button>
+                  <Button type="submit" disabled={busy} className="admin-primary">
+                    <ShieldCheck aria-hidden="true" />
+                    基本情報を保存
+                  </Button>
+                </div>
+                </form>
+                <form className="admin-password-form" onSubmit={saveAdminPassword}>
                 <section>
                   <div className="password-section-head">
                     <div>
                       <h3>パスワード変更</h3>
                       <p>
-                        現在のパスワードは必須です。新しいパスワードは変更時のみ入力してください。
+                        現在のパスワードと新しいパスワードを入力してください。
                       </p>
                     </div>
                     <KeyRound aria-hidden="true" />
@@ -2332,6 +2373,7 @@ export default function AdminConsole() {
                           )
                         }
                         autoComplete="current-password"
+                        required
                       />
                     </div>
                     <div>
@@ -2346,6 +2388,7 @@ export default function AdminConsole() {
                           setNewPassword(event.target.value)
                         }
                         autoComplete="new-password"
+                        required
                       />
                     </div>
                     <div>
@@ -2362,17 +2405,18 @@ export default function AdminConsole() {
                           )
                         }
                         autoComplete="new-password"
+                        required
                       />
                     </div>
                   </div>
                 </section>
-                {adminFormError && (
+                {passwordFormError && (
                   <div
                     className="account-form-error"
                     role="alert"
                   >
                     <CircleAlert aria-hidden="true" />
-                    {adminFormError}
+                    {passwordFormError}
                   </div>
                 )}
                 <div className="account-form-actions">
@@ -2380,17 +2424,13 @@ export default function AdminConsole() {
                     type="button"
                     variant="outline"
                     onClick={() => {
-                      setAdminDraft({
-                        name: adminAccount.name,
-                        email: adminAccount.email,
-                      });
                       setCurrentPassword("");
                       setNewPassword("");
                       setConfirmPassword("");
-                      setAdminFormError("");
+                      setPasswordFormError("");
                     }}
                   >
-                    変更を取り消す
+                    入力を取り消す
                   </Button>
                   <Button
                     type="submit"
@@ -2398,10 +2438,11 @@ export default function AdminConsole() {
                     className="admin-primary"
                   >
                     <ShieldCheck aria-hidden="true" />
-                    管理者情報を保存
+                    パスワードを変更
                   </Button>
                 </div>
               </form>
+              </div>
             </section>
           )}
         </main>

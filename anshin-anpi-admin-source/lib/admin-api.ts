@@ -6,11 +6,11 @@ const connectionMessage = '管理サービスに接続できません。しば�
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 
-function responseError(status: number, payload: unknown): AdminApiError {
+function responseError(status: number, payload: unknown, path: string): AdminApiError {
   const error = object(object(payload)?.error);
   const code = typeof error?.code === 'string' ? error.code : 'REQUEST_FAILED';
   if (status === 404 && !error) return new AdminApiError(status, 'ADMIN_BACKEND_UNAVAILABLE', connectionMessage);
-  if (status === 401 && code === 'ADMIN_LOGIN_FAILED') return new AdminApiError(status, code, 'メールアドレスまたはパスワードが正しくありません。入力内容をご確認ください。');
+  if (status === 401 && code === 'ADMIN_LOGIN_FAILED' && path === '/login') return new AdminApiError(status, code, 'メールアドレスまたはパスワードが正しくありません。入力内容をご確認ください。');
   if (status === 429) return new AdminApiError(status, code, '操作が多すぎます。5分ほど待ってから、もう一度お試しください。');
   if (['ADMIN_BACKEND_UNAVAILABLE', 'ADMIN_NOT_INITIALIZED'].includes(code)) return new AdminApiError(status, code, connectionMessage);
   return new AdminApiError(status, code, typeof error?.message === 'string' && error.message.trim() ? error.message : status >= 500 ? connectionMessage : '処理を完了できません。もう一度お試しください。');
@@ -32,10 +32,10 @@ export async function adminApi<T>(path: string, method = 'GET', body?: unknown):
     error?: { message?: string; code?: string }; csrf_token?: string; reauthenticate?: boolean;
   }) | undefined;
   if (!response.ok) {
-    if (response.status === 401 && path !== '/login' && csrfToken) {
+    if (response.status === 401 && result?.error?.code === 'ADMIN_SESSION_REQUIRED' && path !== '/login' && csrfToken) {
       csrfToken = ''; window.dispatchEvent(new Event('admin-session-expired'));
     }
-    throw responseError(response.status, payload);
+    throw responseError(response.status, payload, path);
   }
   if (!result || (path === '/login' || path === '/session') && (!object(object(payload)?.admin) || typeof result.csrf_token !== 'string' || !result.csrf_token))
     throw new AdminApiError(response.status, 'ADMIN_RESPONSE_INVALID', connectionMessage);
