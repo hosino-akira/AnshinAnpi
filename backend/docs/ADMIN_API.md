@@ -55,7 +55,7 @@
 | POST `/logout` | `{}` | `logged_out: true`。Cookie を消去 |
 | PUT `/profile` | `name`, `email` | `admin`, `reauthenticate: false`。パスワードとセッション有効期限は変更しない |
 | PUT `/password` | `current_password`, `new_password`。いずれも入力必須、長さ・文字種・組合せの制約なし | `saved: true`, `reauthenticate: true`。すべての旧セッションを失効 |
-| GET `/dashboard` | なし | `counts`, `errors`, `activities` |
+| GET `/dashboard` | なし | `counts`, `errors`, `activities`。メールエラーの `code` は `MAIL-001/MAIL-002`、`message` は仕様書の文面 |
 | GET `/users` | 任意のクエリ：`limit`（1～200、既定値 100）, `offset`（0～100000、既定値 0） | `users`, `total`, `offset`, `limit` |
 | POST `/users/search` | `name`, `reason`。氏名全体で検索 | `users`, `total`, `offset`, `limit` |
 | PUT `/users/{id}` | `name`, `status`, `recipients`, `expected_revision`, `identity_confirmed: true`, `reason`。任意：`reset_face`（既定値 false） | `user`, `registration_mail_count`（追加・変更した宛先への登録確認メールの送信受付件数） |

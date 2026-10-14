@@ -382,12 +382,6 @@ export default function AdminConsole() {
     (error) => ({
       ...error,
       occurredAt: formatDate(error.occurredAt),
-      reason:
-        error.status === "unknown"
-          ? "受理結果が不明です。重複送信を避け、送信記録を確認してください。"
-          : error.status === "bounced"
-            ? "配信できませんでした。送信先を確認してください。"
-            : "メール送信に失敗しました。",
     }),
   );
   const setProfile = (profile: AdminSession["admin"]) => {
@@ -1622,7 +1616,7 @@ export default function AdminConsole() {
                           <TableCell>
                             <div className="error-detail">
                               <code>{error.code}</code>
-                              <span>{error.reason}</span>
+                              <span>{error.message}</span>
                             </div>
                           </TableCell>
                           <TableCell>

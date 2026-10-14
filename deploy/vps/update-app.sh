@@ -71,6 +71,7 @@ import assert from "node:assert/strict";
 import sharp from "sharp";
 import { createAvatar } from "./src/avatar.js";
 import { adminSchemas } from "./src/admin-service.js";
+import { mailErrorDisplay } from "./src/mail-error-display.js";
 const source = await sharp({create:{width:160,height:120,channels:3,background:"#5588aa"}}).jpeg().toBuffer();
 const thumbnail = Buffer.from(await createAvatar(source), "base64");
 const metadata = await sharp(thumbnail).metadata();
@@ -78,13 +79,15 @@ assert.equal(metadata.width,96); assert.equal(metadata.height,96); assert.equal(
 assert(adminSchemas.login.safeParse({email:"test@example.invalid",password:"a"}).success);
 assert(adminSchemas.profile.safeParse({name:"test",email:"test@example.invalid"}).success);
 assert(adminSchemas.passwordChange.safeParse({current_password:"a",new_password:"b"}).success);
+assert.deepEqual(mailErrorDisplay({status:"failed",error_code:"MAIL-001"}),{code:"MAIL-001",message:"確認メールを送信できませんでした。メールアドレスをご確認ください。"});
+assert.deepEqual(mailErrorDisplay({status:"unknown",error_code:"MAIL_RESULT_UNKNOWN"}),{code:"MAIL-002",message:"ただいまメールを送信できません。時間をおいてお試しください。"});
 const response = await fetch("http://127.0.0.1:3001/health/ready");
 assert.equal(response.status,200);
 const denied = await fetch("http://127.0.0.1:3001/v1/admin/users");
 assert.equal(denied.status,401);
 const passwordDenied = await fetch("http://127.0.0.1:3001/v1/admin/password",{method:"PUT",headers:{"Content-Type":"application/json"},body:"{}"});
 assert.equal(passwordDenied.status,401);
-console.log("Production image: thumbnail encoding, separate account/password contracts, health and authentication verified.");
+console.log("Production image: specification mail messages, thumbnail encoding, account/password contracts, health and authentication verified.");
 '
 curl --fail --silent --show-error --max-time 20 https://anshin.info/health/ready >/dev/null
 curl --fail --silent --show-error --location --max-time 20 https://anshin.info/admin/login >/dev/null

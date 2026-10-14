@@ -9,6 +9,7 @@ import { AdminAuth, adminProfile, passwordHash } from './admin-auth.js';
 import { publishedPolicy } from './admin-settings.js';
 import { UserService } from './user-service.js';
 import { createAvatar } from './avatar.js';
+import { mailErrorDisplay } from './mail-error-display.js';
 
 const password = z.string().min(1);
 const revision = z.string().min(1).max(100);
@@ -282,7 +283,7 @@ export class AdminService {
         errors.push({ id:d.delivery_id,userId:d.user_id,userName:d.display_name ? await this.cipher.open(d.display_name,'user-name') : '削除済み',
           recipientName:d.name ? await this.cipher.open(d.name,'recipient-name') : '削除済み',
           email:d.encrypted_email_snapshot ? await this.cipher.open(d.encrypted_email_snapshot,'recipient-email') : '消去済み',
-          occurredAt:d.updated_at,code:d.error_code ?? d.status,status:d.status });
+          occurredAt:d.updated_at,...mailErrorDisplay(d),status:d.status });
       }
       const activities=[];
       const recent=(await db.query(`SELECT a.log_id::text AS id,a.action,a.occurred_at,a.target_id,u.display_name

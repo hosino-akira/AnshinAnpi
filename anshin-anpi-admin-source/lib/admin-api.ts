@@ -50,6 +50,6 @@ export type AdminSettings = {
 };
 export type Policy = { consent_type: 'registration' | 'safety'; policy_version: string; title: string; body: string; effective_date: string; requires_reconsent: boolean };
 export type Dashboard = { counts: { users: number; active: number; recipients: number; today: number; accepted: number; errors: number };
-  errors: { id: string; userId: string; userName: string; recipientName: string; email: string; occurredAt: string; code: string; status: string }[];
+  errors: { id: string; userId: string; userName: string; recipientName: string; email: string; occurredAt: string; code: 'MAIL-001' | 'MAIL-002'; message: string; status: string }[];
   activities: { id?: string; action: string; occurred_at: string; user_name?: string | null; policy_version?: string | null }[];
 };
