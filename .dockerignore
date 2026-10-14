@@ -1,4 +1,5 @@
 .git
+.cache
 .env*
 **/.env*
 backend/.local-terminal.json

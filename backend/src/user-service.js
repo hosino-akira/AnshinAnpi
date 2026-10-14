@@ -4,6 +4,7 @@ import { audit } from './audit.js';
 import { transaction } from './db.js';
 import { publishedPolicy } from './admin-settings.js';
 import { maskEmail } from './validation.js';
+import { createAvatar } from './avatar.js';
 
 export class UserService {
   constructor(deps) { Object.assign(this, deps); }
@@ -177,6 +178,7 @@ export class UserService {
       metrics = { ...captured.metrics, liveness_passed: captured.livenessPassed };
       try {
         draft.image = image.toString('base64');
+        draft.boundingBox = captured.boundingBox;
         delete draft.duplicateCheckedAtCapture;
       } finally { image.fill(0); }
     });
@@ -192,19 +194,20 @@ export class UserService {
   await this.policy(ctx.db, 'registration', consent.policy_version);
   this.face.requireReady();
   const image = Buffer.from(draft.image, 'base64');
-  let reference;
+  let reference, encryptedAvatar;
   try {
     // Serialize face indexing and persistence. The current registration flow has
     // already checked this photo at capture; legacy drafts still need that check.
     await ctx.db.query("SELECT pg_advisory_xact_lock(hashtextextended('anshin:face-registration', 0))");
     if (!draft.duplicateCheckedAtCapture) await this.assertNewFace(ctx.db, image);
+    encryptedAvatar = await this.cipher.seal(await createAvatar(image, draft.boundingBox), 'user-avatar');
     reference = await this.face.index(image, draft.userId);
   } finally { image.fill(0); }
   ctx.rollbacks.push(async () => {
     await this.face.delete(reference);
   });
-  await ctx.db.query(`INSERT INTO users(user_id,display_name,temp_id,terminal_id)
-    VALUES($1,$2,$3,$4)`, [draft.userId, await this.cipher.seal(draft.displayName, 'user-name'), id, request.terminal.terminal_id]);
+  await ctx.db.query(`INSERT INTO users(user_id,display_name,temp_id,terminal_id,encrypted_avatar)
+    VALUES($1,$2,$3,$4,$5)`, [draft.userId, await this.cipher.seal(draft.displayName, 'user-name'), id, request.terminal.terminal_id, encryptedAvatar]);
   for (const [index, recipient] of draft.recipients.entries()) {
     await ctx.db.query(`INSERT INTO recipients(user_id,name,encrypted_email,order_no)
       VALUES($1,$2,$3,$4)`, [draft.userId, await this.cipher.seal(recipient.name, 'recipient-name'),
@@ -227,7 +230,7 @@ export class UserService {
       await this.assertNewFace(ctx.db, captured.image, captured.metrics);
       await this.store.put('draft',id,{id,userId:randomUUID(),terminalId:request.terminal.terminal_id,
         expiresAt,lastActivityAt:new Date().toISOString(),recipients:[],image:captured.image.toString('base64'),
-        duplicateCheckedAtCapture:true},expiresAt);
+        boundingBox:captured.boundingBox,duplicateCheckedAtCapture:true},expiresAt);
     } finally {captured.image.fill(0);}
     ctx.rollbacks.push(() => this.store.remove('draft',id));
     await audit(ctx.db,this.config,request,'enrollment.captured','enrollment',id);

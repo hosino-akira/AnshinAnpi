@@ -7,7 +7,7 @@
 - メールアドレス：`admin@anshin-anpi.jp`
 - 名前：`安心施設 管理者`
 - 初期のランダムなパスワードは Git の対象外の `backend/.admin-setup.json` に保存します。初期設定ツールは認証情報をログに出力しません。
-- メールアドレスとパスワードでログインします。パスワード管理ツールに保存した後、初期設定ファイルを削除してください。プロジェクト所有者の最新の指定により、多要素認証は使用しません。元の XLSX 仕様書は変更しません。
+- メールアドレスとパスワードでログインします。パスワード管理ツールに保存した後、初期設定ファイルを削除してください。プロジェクト所有者の最新の指定により、多要素認証は使用しません。管理者パスワードは入力必須ですが、長さ・文字種・組合せの制約は設けません。変更時の現在のパスワード確認と確認欄の一致検証は継続します。
 
 新しい環境ではデータベースのマイグレーションを適用してから `npm run provision:admin` を実行します。既存のアカウントは上書きしません。パスワードを紛失した場合は、サーバーへのアクセス権があるローカル端末で `npm run provision:admin -- --reset` を実行してください。新しいパスワードを生成し、すべての旧セッションを失効させ、監査記録に残します。インターネット経由のパスワード復旧 API は提供しません。
 
@@ -30,7 +30,7 @@
 | POST `/logout` | セッションの失効と Cookie の消去 |
 | PUT `/profile` | 名前、メールアドレス、パスワードの変更。現在のパスワードを再確認し、保存後にすべてのセッションを失効させる |
 | GET `/dashboard` | 実際の登録者数、連絡先数、東京時間の当日統計、メールエラー、直近の操作 |
-| GET `/users?limit=200&offset=0` | 登録者と連絡先をページ単位で取得。写真や顔の特徴量は返さない |
+| GET `/users?limit=200&offset=0` | 登録者と連絡先をページ単位で取得。小さな顔サムネイルを含み、元の写真や顔の特徴量は返さない |
 | POST `/users/search` | 氏名の完全一致検索。用途 reason の記録が必須 |
 | PUT `/users/{id}` | 氏名と連絡先の変更、利用停止。本人確認とデータの版の確認を行う |
 | DELETE `/users/{id}` | 単一の管理者による削除申請を記録し、利用停止、氏名・メールアドレス・配信スナップショットの消去を行う。監査証跡は保持する |
@@ -52,7 +52,7 @@
 | POST `/login` | `email`, `password` | `admin`, `csrf_token`, `expires_at`。`anshin_admin` Cookie を設定 |
 | GET `/session` | なし | `admin`, `csrf_token`, `expires_at` |
 | POST `/logout` | `{}` | `logged_out: true`。Cookie を消去 |
-| PUT `/profile` | `name`, `email`, `current_password`。任意：`new_password`（12～128 文字） | `admin`, `reauthenticate: true`。すべての旧セッションを失効 |
+| PUT `/profile` | `name`, `email`, `current_password`。任意：`new_password`（空欄は変更なし。長さ・文字種・組合せの制約なし） | `admin`, `reauthenticate: true`。すべての旧セッションを失効 |
 | GET `/dashboard` | なし | `counts`, `errors`, `activities` |
 | GET `/users` | 任意のクエリ：`limit`（1～200、既定値 100）, `offset`（0～100000、既定値 0） | `users`, `total`, `offset`, `limit` |
 | POST `/users/search` | `name`, `reason`。氏名全体で検索 | `users`, `total`, `offset`, `limit` |
@@ -67,9 +67,13 @@
 
 登録者の `status` は `active/suspended/pending_registration` を許可します。`recipients` は 1～2 件の `{name,email,id?}` です。既存の連絡先を保持する場合は `id` を付け、新規の連絡先には付けません。氏名は最大 50 文字で、連絡先のメールアドレスは重複できません。`reset_face: true` は利用者を利用停止にし、再開には顔の再登録 API が必要です。
 
-管理者プロフィールは `name/email/last_login_at/last_login_ip` だけを返し、パスワードは返しません。各登録者は `id/name/status/faceStatus/registeredAt/updatedAt/revision/lastCheckAt/consentVersion/recipients` を返し、元の写真や顔の特徴量は返しません。
+管理者プロフィールは `name/email/last_login_at/last_login_ip` だけを返し、パスワードは返しません。各登録者は `id/name/status/faceStatus/avatar/registeredAt/updatedAt/revision/lastCheckAt/consentVersion/recipients` を返し、元の写真や顔の特徴量は返しません。`avatar` は `data:image/jpeg;base64,...` 形式の 96×96 ピクセルのサムネイル、未保存の場合は `null` です。ホームの最近の登録者と登録者一覧に円形で表示し、クリック・拡大・詳細表示は提供しません。
+
+サムネイルは新規登録の確定時または本人立会いの顔再登録時だけ作成し、`users.encrypted_avatar` に既存の暗号化方式で保存します。既存利用者への補完や安否確認時の撮影による更新は行いません。元画像と画像メタデータは保存しません。サムネイルは登録継続中に保持し、通常の利用停止時は保持します。顔再登録要求時は旧画像を消去し、再登録成功時に新しい画像を保存します。登録削除または登録同意の撤回時には DB トリガーで即時消去します。バックアップ内の暗号化データは既存のバックアップ保管・ローテーションの対象です。画像専用の公開 URL や API は追加せず、認証済みの管理 API の応答にのみ含めます。管理 API の応答は `Cache-Control: no-store` です。
 
 ダッシュボードの `activities` は直近 5 件の `{id,action,occurred_at,user_name,policy_version}` を返します。氏名は現在の登録者情報から取得し、削除済みの場合は `null` です。版番号は文面公開時の監査対象から取得します。画面はイベントコードを日本語の操作説明に変換し、その下に東京時間を基準とした相対時刻を表示します。送信先だけの変更は `admin.recipient.updated`、利用停止は `admin.user.suspended`、利用再開は `admin.user.resumed` として記録し、従来の `admin.user.updated` は登録者情報の更新として表示します。
+
+管理者がログを閲覧できるのはホームの直近 5 件だけです。ログの検索・絞り込み・全件閲覧・詳細閲覧・エクスポート・変更・削除を行う画面や専用 API は提供しません。システム側の監査記録・保存期間・機微情報の遮蔽・改ざん検知は継続し、保存期間満了時の自動削除または匿名化は管理者の操作とは分離します。
 
 失敗時の応答は `{error:{code,message,request_id}}` です。検証エラーでは `details` を追加する場合があります。主なステータスは、400：入力が無効、401：パスワード不一致またはセッション失効、403：送信元または CSRF の検証失敗、404：記録なし、409：版の競合、429：一時的な制限、503：サービス利用不可です。ログイン画面では、API の未実装、接続不可、アカウント未設定を接続失敗として表示します。パスワード不一致はメールアドレスまたはパスワードの誤りとして表示し、制限やタイムアウトにも明確な案内を表示します。エラー領域はほかのエラーと同じ赤色のスタイルで表示し、自動でフォーカスします。ログイン処理中は送信ボタンを無効にします。
 

@@ -49,8 +49,8 @@ export class AwsFaceProvider {
     const image = Buffer.from(result.ReferenceImage?.Bytes ?? []);
     if (!image.length) fail(422, 'FACE-001', 'もう一度、顔を撮影してください。');
     try {
-      const metrics = await this.inspectImage(image);
-      return { image, qualityPassed: true, livenessPassed: true, metrics: {
+      const { metrics, boundingBox } = await this.inspectImage(image);
+      return { image, boundingBox, qualityPassed: true, livenessPassed: true, metrics: {
         ...metrics, liveness_score: result.Confidence,
       } };
     } catch (error) { image.fill(0); throw error; }
@@ -64,8 +64,8 @@ export class AwsFaceProvider {
       if (!image.length || image.length > 512 * 1024 || (!jpeg && !png)) {
         fail(400, 'INVALID_FACE_IMAGE', 'JPEG または PNG（512 KiB 以下）を送信してください。');
       }
-      const metrics = await this.inspectImage(image);
-      return { image, qualityPassed: true, livenessPassed: false, metrics };
+      const { metrics, boundingBox } = await this.inspectImage(image);
+      return { image, boundingBox, qualityPassed: true, livenessPassed: false, metrics };
     } catch (error) { image.fill(0); throw error; }
   }
   async inspectImage(image) {
@@ -86,7 +86,7 @@ export class AwsFaceProvider {
           thresholds: { face_confidence_min: 99, brightness_min: 40, sharpness_min: 40, pose_abs_max: 30 },
         });
       }
-      return metrics;
+      return { metrics, boundingBox: face.BoundingBox };
   }
   async index(image, userId) {
     this.requireReady();

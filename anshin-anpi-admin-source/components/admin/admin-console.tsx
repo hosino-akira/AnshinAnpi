@@ -128,6 +128,7 @@ type RegisteredUser = {
   revision: string;
   status: UserStatus;
   faceStatus: FaceStatus;
+  avatar: string | null;
   registeredAt: string;
   updatedAt: string;
   lastCheckAt: string;
@@ -261,12 +262,27 @@ function FacePhoto({
   user: RegisteredUser;
   size?: "table" | "large";
 }) {
+  const [failedAvatar, setFailedAvatar] = useState<string | null>(null);
+  const avatar = user.avatar;
   return (
     <span
       className="face-placeholder"
       aria-label={`${user.name}さん`}
     >
-      <UserRound aria-hidden="true" />
+      {avatar && avatar !== failedAvatar ? (
+        // The API returns only a 96px thumbnail. It has no preview or link.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={avatar}
+          alt=""
+          width={44}
+          height={44}
+          draggable={false}
+          onError={() => setFailedAvatar(avatar)}
+        />
+      ) : (
+        <UserRound aria-hidden="true" />
+      )}
     </span>
   );
 }
@@ -632,13 +648,9 @@ export default function AdminConsole() {
   ) => {
     event.preventDefault();
     if (busy) return;
-    if (
-      newPassword &&
-      (newPassword.length < 12 ||
-        newPassword !== confirmPassword)
-    ) {
+    if (newPassword !== confirmPassword) {
       setAdminFormError(
-        "新しいパスワードは12文字以上で、確認欄と一致させてください。",
+        "新しいパスワードを確認欄と一致させてください。",
       );
       return;
     }

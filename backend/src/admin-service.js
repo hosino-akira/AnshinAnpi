@@ -8,14 +8,15 @@ import { sha256, canonical } from './crypto.js';
 import { AdminAuth, adminProfile, passwordHash } from './admin-auth.js';
 import { publishedPolicy } from './admin-settings.js';
 import { UserService } from './user-service.js';
+import { createAvatar } from './avatar.js';
 
-const password = z.string().min(12).max(128);
+const password = z.string().min(1);
 const revision = z.string().min(1).max(100);
 const reason = z.enum(['support', 'correction', 'suspension', 'deletion', 'audit']);
 const contact = z.strictObject({ id: uuid.optional(), name: displayName, email });
 export const adminSchemas = {
-  login: z.strictObject({ email, password: z.string().min(1).max(128) }),
-  profile: z.strictObject({ name: displayName, email, current_password: z.string().min(1).max(128), new_password: password.optional() }),
+  login: z.strictObject({ email, password }),
+  profile: z.strictObject({ name: displayName, email, current_password: password, new_password: password.optional() }),
   user: z.strictObject({ name: displayName, status: z.enum(['active','suspended','pending_registration']),
     recipients: z.array(contact).min(1).max(2).refine(rows => new Set(rows.map(x => x.email)).size === rows.length, 'Duplicate recipients'),
     expected_revision: revision, identity_confirmed: z.literal(true), reset_face: z.boolean().default(false), reason }),
@@ -66,6 +67,7 @@ export class AdminService {
     const consent = (await db.query("SELECT policy_version FROM consents WHERE user_id=$1 AND consent_type='registration' AND result='granted' ORDER BY consented_at DESC LIMIT 1", [row.user_id])).rows[0];
     const lastCheck = (await db.query("SELECT max(created_at) AS at FROM safety_checks WHERE user_id=$1 AND check_type='safety'", [row.user_id])).rows[0].at;
     return { id: row.user_id, name: await this.cipher.open(row.display_name, 'user-name'), status: row.status,
+      avatar: row.encrypted_avatar ? `data:image/jpeg;base64,${await this.cipher.open(row.encrypted_avatar, 'user-avatar')}` : null,
       faceStatus: hasFace ? 'registered' : 'renewal', registeredAt: row.registered_at ?? row.created_at,
       updatedAt: row.updated_at, revision: row.revision, lastCheckAt: lastCheck, consentVersion: consent?.policy_version ?? '',
       recipients: await Promise.all(contacts.map(async x => ({ id: x.recipient_id, name: await this.cipher.open(x.name, 'recipient-name'),
@@ -152,7 +154,10 @@ export class AdminService {
         fail(409,'NO_ACTIVE_RECIPIENT','有効な送信先を登録してください。');
       await db.query(`UPDATE users SET display_name=$2,status=$3::varchar,suspended_at=CASE WHEN $3::varchar='suspended' THEN clock_timestamp() ELSE NULL END WHERE user_id=$1`,
         [user.user_id,await this.cipher.seal(body.name,'user-name'),targetStatus]);
-      if (body.reset_face) await db.query("UPDATE face_templates SET status='revoked' WHERE user_id=$1 AND status='active'",[user.user_id]);
+      if (body.reset_face) {
+        await db.query("UPDATE face_templates SET status='revoked' WHERE user_id=$1 AND status='active'",[user.user_id]);
+        await db.query('UPDATE users SET encrypted_avatar=NULL WHERE user_id=$1',[user.user_id]);
+      }
       const action = body.reset_face ? 'admin.face.reset'
         : user.status !== targetStatus && targetStatus === 'suspended' ? 'admin.user.suspended'
         : user.status !== targetStatus && targetStatus === 'active' ? 'admin.user.resumed'
@@ -199,12 +204,13 @@ export class AdminService {
         const policy=await publishedPolicy(db,this.policies,'registration',body.policy_version);
         if (!(await db.query("SELECT 1 FROM recipients WHERE user_id=$1 AND status='active'",[user.user_id])).rowCount) fail(409,'NO_ACTIVE_RECIPIENT','先に有効な送信先を登録してください。');
         await new UserService(this).assertNewFace(db,captured.image);
+        const encryptedAvatar=await this.cipher.seal(await createAvatar(captured.image,captured.boundingBox),'user-avatar');
         reference=await this.face.index(captured.image,user.user_id);
         await db.query(`INSERT INTO face_templates(user_id,encrypted_template,provider,model_version,threshold_version) VALUES($1,$2,$3,$4,$5)`,
           [user.user_id,await this.cipher.seal(reference,'face-reference'),this.face.name,reference.modelVersion,this.config.thresholdVersion]);
         const terminalId=user.terminal_id ?? (await db.query("SELECT terminal_id FROM terminals WHERE status='active' LIMIT 1")).rows[0]?.terminal_id;
         await db.query(`INSERT INTO consents(user_id,consent_type,policy_version,terminal_id,result,request_id) VALUES($1,'registration',$2,$3,'granted',$4)`,[user.user_id,policy.policy_version,terminalId,request.id]);
-        await db.query("UPDATE users SET status='active',suspended_at=NULL WHERE user_id=$1",[user.user_id]);
+        await db.query("UPDATE users SET status='active',suspended_at=NULL,encrypted_avatar=$2 WHERE user_id=$1",[user.user_id,encryptedAvatar]);
         await audit(db,this.config,request,'admin.face.reenrolled','user',user.user_id);
         return { user:await this.serialize(db,await this.user(db,user.user_id)), liveness_passed:false };
       });
