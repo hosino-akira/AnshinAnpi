@@ -25,7 +25,7 @@ export class TemporaryStore {
     try {
       const result = await action();
       if (transactionContext) {
-        // Completion must stay locked through SQL COMMIT and image cleanup.
+        // SQL の COMMIT と画像の消去が完了するまで、完了処理のロックを保持します。
         transactionContext.commits.push(release);
         transactionContext.rollbacks.unshift(release);
         deferred = true;

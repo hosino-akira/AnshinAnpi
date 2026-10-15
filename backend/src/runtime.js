@@ -11,7 +11,7 @@ export async function createRuntime() {
   const config = await readConfig();
   const pool = createPool(config);
   try {
-    if (!(await pool.query("SELECT 1 FROM app_meta.schema_migrations WHERE version='010_user_avatars'")).rowCount) throw new Error('Run the database migrations first');
+    if (!(await pool.query("SELECT 1 FROM app_meta.schema_migrations WHERE version='011_mail_error_acknowledgement'")).rowCount) throw new Error('先にデータベースの SQL を適用してください。');
     const cipher = config.encryptionMode === 'kms' ? new KmsCipher(config) : new LocalCipher(config.encryptionKey, config.encryptionKeyId);
     const store = new TemporaryStore(config);
     const face = new AwsFaceProvider(config);

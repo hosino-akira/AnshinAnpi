@@ -1,4 +1,4 @@
-/** Cloudflare Worker entry point for the vinext-starter template. */
+/** Cloudflare Worker の実行入口。 */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { proxyAdmin } from "../build/admin-proxy.mjs";
@@ -21,10 +21,9 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
-// Image security config. SVG sources with .svg extension auto-skip the
-// optimization endpoint on the client side (served directly, no proxy).
-// To route SVGs through the optimizer (with security headers), set
-// dangerouslyAllowSVG: true in next.config.js and uncomment below:
+// 拡張子 .svg の画像は最適化処理を経由せず、そのまま配信します。
+// セキュリティヘッダー付きの最適化処理を経由させる場合は、
+// next.config.ts に dangerouslyAllowSVG: true を設定して画像設定へ反映します。
 // const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
 
 const worker = {

@@ -109,7 +109,7 @@ function MessageScrollerButton({
         <>
           <ArrowDownIcon />
           <span className="sr-only">
-            {direction === "end" ? "Scroll to end" : "Scroll to start"}
+            {direction === "end" ? "末尾へ移動" : "先頭へ移動"}
           </span>
         </>
       )}

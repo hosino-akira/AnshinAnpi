@@ -20,7 +20,7 @@ export const adminSchemas = {
   profile: z.strictObject({ name: displayName, email }),
   passwordChange: z.strictObject({ current_password: password, new_password: password }),
   user: z.strictObject({ name: displayName, status: z.enum(['active','suspended','pending_registration']),
-    recipients: z.array(contact).min(1).max(2).refine(rows => new Set(rows.map(x => x.email)).size === rows.length, 'Duplicate recipients'),
+    recipients: z.array(contact).min(1).max(2).refine(rows => new Set(rows.map(x => x.email)).size === rows.length, '送信先が重複しています。'),
     expected_revision: revision, identity_confirmed: z.literal(true), reset_face: z.boolean().default(false), reason }),
   deletion: z.strictObject({ expected_revision: revision, reason: z.literal('deletion') }),
   search: z.strictObject({ name: displayName, reason }),
@@ -41,6 +41,7 @@ export const adminRoutes = [
   ['put','/v1/admin/profile','管理者の名前とメールアドレスの変更','profile'],
   ['put','/v1/admin/password','現在のパスワードを確認してパスワードを変更','passwordChange'],
   ['get','/v1/admin/dashboard','統計と直近のメールエラー'],
+  ['post','/v1/admin/mail-errors/{id}/acknowledge','メール送信エラーを確認済みにして一覧から除外'],
   ['get','/v1/admin/users','登録者と連絡先の一覧をページ単位で取得'],
   ['post','/v1/admin/users/search','氏名の完全一致検索と用途の記録','search'],
   ['put','/v1/admin/users/{id}','情報の訂正、利用停止、顔の再登録要求','user'],
@@ -159,7 +160,7 @@ export class AdminService {
           await this.cipher.open(old.encrypted_email,'recipient-email') !== recipient.email) recipientsChanged = true;
       }
       for (const old of existing) if (!ids.includes(old.recipient_id)) await this.eraseRecipient(db,old.recipient_id);
-      // Temporarily free the two order slots, then restore selected recipients atomically.
+      // 2 件分の表示順を一時的に空け、選択した連絡先を同じトランザクションで戻します。
       await db.query("UPDATE recipients SET status='deleted' WHERE user_id=$1 AND status<>'deleted'",[user.user_id]);
       const changedRecipients = [];
       for (const [index,recipient] of body.recipients.entries()) {
@@ -244,7 +245,7 @@ export class AdminService {
       if (reference) {
         try { await this.face.delete(reference); }
         catch {
-          // Keep the encrypted reference for the existing worker's retry cleanup.
+          // 既存ワーカーが削除を再試行できるよう、暗号化した参照情報を保持します。
           await transaction(this.pool,async db=> {
             await db.query(`INSERT INTO face_templates(user_id,encrypted_template,provider,model_version,threshold_version,status)
               VALUES($1,$2,$3,$4,$5,'revoked')`,[request.params.id,await this.cipher.seal(reference,'face-reference'),this.face.name,reference.modelVersion,this.config.thresholdVersion]);
@@ -275,11 +276,11 @@ export class AdminService {
         (SELECT count(*) FROM recipients WHERE status<>'deleted') AS recipients,
         (SELECT count(*) FROM safety_checks WHERE check_type='safety' AND (created_at AT TIME ZONE 'Asia/Tokyo')::date=(clock_timestamp() AT TIME ZONE 'Asia/Tokyo')::date) AS today,
         (SELECT count(*) FROM safety_checks WHERE check_type='safety' AND status='accepted' AND (created_at AT TIME ZONE 'Asia/Tokyo')::date=(clock_timestamp() AT TIME ZONE 'Asia/Tokyo')::date) AS accepted,
-        (SELECT count(*) FROM mail_deliveries WHERE status IN ('failed','unknown','bounced')) AS errors`)).rows[0];
+        (SELECT count(*) FROM mail_deliveries WHERE status IN ('failed','unknown','bounced') AND error_acknowledged_at IS NULL) AS errors`)).rows[0];
       const errors=[];
       for (const d of (await db.query(`SELECT d.*,u.display_name,r.name FROM mail_deliveries d
         LEFT JOIN users u ON u.user_id=d.user_id LEFT JOIN recipients r ON r.recipient_id=d.recipient_id
-        WHERE d.status IN ('failed','unknown','bounced') ORDER BY d.updated_at DESC LIMIT 50`)).rows) {
+        WHERE d.status IN ('failed','unknown','bounced') AND d.error_acknowledged_at IS NULL ORDER BY d.updated_at DESC,d.delivery_id DESC LIMIT 5`)).rows) {
         errors.push({ id:d.delivery_id,userId:d.user_id,userName:d.display_name ? await this.cipher.open(d.display_name,'user-name') : '削除済み',
           recipientName:d.name ? await this.cipher.open(d.name,'recipient-name') : '削除済み',
           email:d.encrypted_email_snapshot ? await this.cipher.open(d.encrypted_email_snapshot,'recipient-email') : '消去済み',
@@ -302,6 +303,18 @@ export class AdminService {
       });
       await audit(db,this.config,request,'admin.dashboard.read','dashboard',null);
       return { counts:Object.fromEntries(Object.entries(counts).map(([key,value])=>[key,Number(value)])),errors,activities };
+    });
+  }
+  async acknowledgeMailError(request) {
+    return transaction(this.pool, async db => {
+      const delivery = (await db.query('SELECT status,error_acknowledged_at FROM mail_deliveries WHERE delivery_id=$1 FOR UPDATE', [request.params.id])).rows[0];
+      if (!delivery) fail(404, 'NOT_FOUND', 'メール送信エラーが見つかりません。');
+      if (!['failed','unknown','bounced'].includes(delivery.status)) fail(409, 'MAIL_ERROR_CHANGED', '送信状況が変更されました。最新データを読み込んでください。');
+      if (!delivery.error_acknowledged_at) {
+        await db.query('UPDATE mail_deliveries SET error_acknowledged_at=clock_timestamp() WHERE delivery_id=$1', [request.params.id]);
+        await audit(db, this.config, request, 'admin.mail_error.acknowledged', 'delivery', request.params.id);
+      }
+      return { acknowledged: true };
     });
   }
   async settings(request) {
@@ -351,7 +364,7 @@ export async function registerAdmin(app,deps) {
     });
     api.addHook('onResponse',async(request,reply)=> {
       if (reply.statusCode>=400 && request.admin) {
-        // All rejected admin actions are audited after their transaction rolls back.
+        // 拒否した管理操作も、トランザクションのロールバック後に監査記録へ残します。
         request.auditReason=null;
         const requestedReason=request.body?.reason;
         request.body={reason:['support','correction','suspension','deletion','audit'].includes(requestedReason) ? requestedReason : undefined};
@@ -387,6 +400,7 @@ export async function registerAdmin(app,deps) {
     api.put('/v1/admin/profile',mutate(adminSchemas.profile,(request,body)=>service.saveProfile(request,body)));
     api.put('/v1/admin/password',mutate(adminSchemas.passwordChange,(request,body,reply)=>service.changePassword(request,body,reply)));
     api.get('/v1/admin/dashboard',request=>service.dashboard(request));
+    api.post('/v1/admin/mail-errors/:id/acknowledge',mutate(null,request=>service.acknowledgeMailError(request)));
     api.get('/v1/admin/users',request=>service.list(request));
     api.post('/v1/admin/users/search',mutate(adminSchemas.search,(request,body)=>service.list(request,body)));
     api.put('/v1/admin/users/:id',mutate(adminSchemas.user,(request,body)=>service.updateUser(request,body)));

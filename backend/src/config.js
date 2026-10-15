@@ -4,7 +4,7 @@ import { parseEnv } from 'node:util';
 import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { email } from './validation.js';
 
-// Also used by the SMTP check, which does not need database or encryption secrets.
+// DB や暗号化キーを使わない SMTP 接続確認でも利用します。
 export function readMailConfig(env = process.env, secrets = {}) {
   const address = name => {
     const value = env[name]?.trim();
@@ -31,6 +31,30 @@ export function readMailConfig(env = process.env, secrets = {}) {
   };
 }
 
+export function readBounceConfig(env = process.env, secrets = {}) {
+  if (env.MAIL_BOUNCE_ENABLED && !['true', 'false'].includes(env.MAIL_BOUNCE_ENABLED)) throw new Error('INVALID_MAIL_BOUNCE_ENABLED');
+  const mail = readMailConfig(env, secrets);
+  const integer = (name, fallback, min, max) => {
+    const value = Number(env[name] ?? fallback);
+    if (!Number.isInteger(value) || value < min || value > max) throw new Error(`INVALID_${name}`);
+    return value;
+  };
+  const bounce = {
+    bounceEnabled: env.MAIL_BOUNCE_ENABLED === 'true',
+    bounceHost: env.MAIL_BOUNCE_IMAP_HOST?.trim() || mail.smtpHost,
+    bouncePort: integer('MAIL_BOUNCE_IMAP_PORT', 993, 1, 65535),
+    bounceUser: env.MAIL_BOUNCE_IMAP_USER?.trim() || mail.smtpUser,
+    bouncePassword: secrets.MAIL_BOUNCE_IMAP_PASSWORD ?? env.MAIL_BOUNCE_IMAP_PASSWORD ?? mail.smtpPassword,
+    bounceMailbox: env.MAIL_BOUNCE_IMAP_MAILBOX?.trim() || 'INBOX',
+    bouncePollSeconds: integer('MAIL_BOUNCE_POLL_SECONDS', 60, 10, 3600),
+    bounceLookbackDays: integer('MAIL_BOUNCE_LOOKBACK_DAYS', 7, 1, 365),
+  };
+  if (bounce.bounceEnabled && (!bounce.bounceHost || !bounce.bounceUser || !bounce.bouncePassword || !mail.smtpFrom))
+    throw new Error('MAIL_BOUNCE_CONFIG_REQUIRED');
+  if (bounce.bounceHost && !/^[a-zA-Z0-9.-]+$/.test(bounce.bounceHost)) throw new Error('INVALID_MAIL_BOUNCE_IMAP_HOST');
+  return bounce;
+}
+
 export function loadLocalEnv() {
   for (const path of [new URL('../../.env', import.meta.url), new URL('../.env', import.meta.url)]) {
     if (existsSync(path)) {
@@ -49,14 +73,14 @@ export async function readConfig(env = process.env) {
   }
   const key = (name) => {
     const value = secrets[name] ?? env[name];
-    if (!value || Buffer.from(value, 'base64').length !== 32) throw new Error(`${name} must be a base64-encoded 32-byte secret`);
+    if (!value || Buffer.from(value, 'base64').length !== 32) throw new Error(`${name} には Base64 形式の 32 バイトの秘密キーが必要です。`);
     return Buffer.from(value, 'base64');
   };
   const mode = env.DATA_ENCRYPTION_MODE ?? 'local';
-  if (!['local', 'kms'].includes(mode)) throw new Error('Invalid DATA_ENCRYPTION_MODE');
-  if (production && mode !== 'kms') throw new Error('Production requires KMS encryption');
-  if (mode === 'kms' && (!env.AWS_REGION || !env.AWS_KMS_KEY_ARN)) throw new Error('KMS region/key are required');
-  if (production && !env.CORS_ORIGINS) throw new Error('Production requires explicit CORS_ORIGINS');
+  if (!['local', 'kms'].includes(mode)) throw new Error('DATA_ENCRYPTION_MODE の設定が無効です。');
+  if (production && mode !== 'kms') throw new Error('本番環境では KMS による暗号化が必要です。');
+  if (mode === 'kms' && (!env.AWS_REGION || !env.AWS_KMS_KEY_ARN)) throw new Error('KMS のリージョンとキーが必要です。');
+  if (production && !env.CORS_ORIGINS) throw new Error('本番環境では CORS_ORIGINS を明示してください。');
   const config = {
     production, host: env.API_HOST ?? '127.0.0.1', port: Number(env.API_PORT ?? 3001),
     postgres: env.DATABASE_URL ? { connectionString: env.DATABASE_URL } : {
@@ -71,8 +95,9 @@ export async function readConfig(env = process.env) {
     awsRegion: env.AWS_REGION, rekognitionRegion: env.AWS_REKOGNITION_REGION ?? env.AWS_REGION,
     collectionId: env.AWS_REKOGNITION_COLLECTION_ID,
     ...readMailConfig(env, secrets),
+    ...readBounceConfig(env, secrets),
     corsOrigins: (env.CORS_ORIGINS ?? 'http://localhost:5173,http://127.0.0.1:5173').split(',').map(s => s.trim()).filter(Boolean),
-    // Initial PoC settings, intentionally configurable rather than claimed accuracy guarantees.
+    // 初期検証用のしきい値です。認識精度を保証する値ではなく、設定で変更できます。
     matchThreshold: Number(env.FACE_MATCH_THRESHOLD ?? 0.99), requiredMargin: Number(env.FACE_MATCH_MARGIN ?? 0.05),
     livenessThreshold: Number(env.FACE_LIVENESS_THRESHOLD ?? 0.99), thresholdVersion: env.FACE_THRESHOLD_VERSION ?? 'poc-v1',
     // 操作間隔は5分まで許容し、セッション全体は15分で終了します。
@@ -82,8 +107,8 @@ export async function readConfig(env = process.env) {
     migrationsPath: fileURLToPath(new URL('../../database/migrations/', import.meta.url)),
   };
   for (const setting of ['matchThreshold', 'requiredMargin', 'livenessThreshold']) {
-    if (!Number.isFinite(config[setting]) || config[setting] < 0 || config[setting] > 1) throw new Error(`Invalid ${setting}`);
+    if (!Number.isFinite(config[setting]) || config[setting] < 0 || config[setting] > 1) throw new Error(`${setting} の設定が無効です。`);
   }
-  if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) throw new Error('Invalid API_PORT');
+  if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) throw new Error('API_PORT の設定が無効です。');
   return config;
 }

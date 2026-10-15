@@ -31,7 +31,7 @@ export class UserService {
       fail(400, 'USER_ID_REQUIRED', '利用者IDを指定してください。');
     const hash = userId;
     let row = await this.store.get('session', hash);
-    // Serialize mutations for one user through the existing user row.
+    // 既存の利用者行をロックし、同一利用者への変更を順番に処理します。
     const user = row && (await db.query('SELECT status FROM users WHERE user_id=$1 FOR UPDATE', [row.user_id])).rows[0];
     row = await this.store.get('session', hash);
     if (!row || row.terminal_id !== request.terminal.terminal_id || row.revoked_at || !user
@@ -103,8 +103,8 @@ export class UserService {
   async consentDraft(request, id, body, ctx) {
     return this.store.lock('draft', id, async () => {
       const draft = await this.draft(request, id);
-      // Record consent before the browser sends face video to AWS. The face is
-      // still required by completeDraft before registration can be persisted.
+      // ブラウザが顔動画を AWS へ送る前に同意を記録します。登録情報の保存前には、
+      // completeDraft で顔情報の存在も確認します。
       if (body.result === 'granted' && !draft.displayName) fail(409, 'ENROLLMENT_INCOMPLETE', 'お名前を入力してから同意してください。');
       await this.policy(ctx.db, 'registration', body.policy_version);
       const existing = (await ctx.db.query(`SELECT * FROM consents WHERE temp_id=$1 AND terminal_id=$2 AND consent_type='registration'`, [id, request.terminal.terminal_id])).rows[0];
@@ -196,8 +196,8 @@ export class UserService {
   const image = Buffer.from(draft.image, 'base64');
   let reference, encryptedAvatar;
   try {
-    // Serialize face indexing and persistence. The current registration flow has
-    // already checked this photo at capture; legacy drafts still need that check.
+    // 顔の登録と DB 保存を順番に処理します。現在の登録フローでは撮影時に確認済みですが、
+    // 旧フローの仮登録ではここで写真を確認します。
     await ctx.db.query("SELECT pg_advisory_xact_lock(hashtextextended('anshin:face-registration', 0))");
     if (!draft.duplicateCheckedAtCapture) await this.assertNewFace(ctx.db, image);
     encryptedAvatar = await this.cipher.seal(await createAvatar(image, draft.boundingBox), 'user-avatar');
@@ -245,7 +245,7 @@ export class UserService {
       const draft=await this.draft(request,id);
       await this.policy(ctx.db,'registration',body.policy_version);
       if (!draft.image) fail(409,'ENROLLMENT_INCOMPLETE','最初に顔写真を撮影してください。');
-      // Always acquire this before the audit-chain lock, including the legacy flow.
+      // 旧フローを含め、必ず監査チェーンより先にこのロックを取得します。
       if (body.consent_result==='granted')
         await ctx.db.query("SELECT pg_advisory_xact_lock(hashtextextended('anshin:face-registration', 0))");
       const consent=(await ctx.db.query(`INSERT INTO consents(temp_id,consent_type,policy_version,terminal_id,result,request_id)
@@ -399,7 +399,7 @@ export class UserService {
       return {
         check_id: id, type: check.check_type, status: check.status, created_at: check.created_at,
         completed_at:check.completed_at,recipient_results:deliveries,mail_status:check.status,user_id:check.user_id,user_status:check.user_status,
-        registration_completed:check.check_type==='registration' && deliveries.length>0 && deliveries.every(d=>['accepted','delivered','bounced'].includes(d.status)) && check.user_status==='active'
+        registration_completed:check.check_type==='registration' && deliveries.length>0 && deliveries.every(d=>['accepted','delivered'].includes(d.status)) && check.user_status==='active'
       };
     });
   }

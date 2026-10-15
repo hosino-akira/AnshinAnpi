@@ -1843,19 +1843,6 @@ export default function Home() {
           </p>
         )}
       </section>
-      {import.meta.env.DEV && (
-        <nav
-          aria-label="API 接続テスト"
-          style={{
-            padding: "8px 24px",
-            textAlign: "right",
-          }}
-        >
-          <a href="/dev/face">
-            顔認証 API テスト：写真登録 / 顔認証 / 評価
-          </a>
-        </nav>
-      )}
       <StepRail screen={screen} />
       <div className="screen-stage">{renderScreen()}</div>
 

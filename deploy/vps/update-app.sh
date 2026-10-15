@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-# Run with sudo. Update code and the additive avatar schema; preserve policies.
+# sudo で実行します。アプリと顔サムネイル用の DB 項目を更新し、同意文面は維持します。
 test "$(id -u)" -eq 0
 release_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 release_tag=$(tr -d '\r\n' < "$release_dir/release-tag.txt")
@@ -15,7 +15,7 @@ test -f "$runtime_env"
 test -f "$release_dir/images.tar"
 test -f "$release_dir/database/migrations/010_user_avatars.sql"
 compose_dir=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$api_name")
-case "$compose_dir" in /home/debian/anshin-anpi/releases/*) ;; *) echo 'Unexpected deployment path.' >&2; exit 1 ;; esac
+case "$compose_dir" in /home/debian/anshin-anpi/releases/*) ;; *) echo '配置先が想定と異なります。' >&2; exit 1 ;; esac
 compose() { docker compose --env-file "$runtime_env" -f "$compose_dir/compose.production.yaml" "$@"; }
 database_sql() {
   docker exec -i "$database_name" sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' psql "$@"
@@ -35,15 +35,15 @@ new_api=$(docker image inspect --format '{{.Id}}' "anshin-anpi-api:$release_tag"
 new_admin=$(docker image inspect --format '{{.Id}}' "anshin-anpi-admin:$release_tag")
 backup_dir=$(mktemp -d /home/debian/.config/anshin-anpi/app-deploy-backup.XXXXXXXX)
 cp -p -- "$runtime_env" "$backup_dir/runtime.env"
-printf '%s\n' "Backup directory: $backup_dir"
+printf '%s\n' "バックアップ先：$backup_dir"
 rollback() {
   deployment_status=$?
   trap - ERR
-  echo 'Deployment failed; restoring previous application images and environment.' >&2
+  echo '更新に失敗しました。直前のアプリイメージと環境変数を復元します。' >&2
   cp -p -- "$backup_dir/runtime.env" "$runtime_env"
-  # The additive nullable column and deletion triggers are compatible with old code.
+  # 追加した NULL 許容の列と削除トリガーは旧アプリでも使用できます。
   compose up -d --no-deps --pull never --force-recreate --wait --wait-timeout 120 api admin || {
-    echo "Application rollback needs attention. Database backup: $backup_dir/database.dump" >&2
+    echo "アプリの復元に失敗しました。DB バックアップ：$backup_dir/database.dump" >&2
     exit 1
   }
   exit "$deployment_status"
@@ -87,10 +87,10 @@ const denied = await fetch("http://127.0.0.1:3001/v1/admin/users");
 assert.equal(denied.status,401);
 const passwordDenied = await fetch("http://127.0.0.1:3001/v1/admin/password",{method:"PUT",headers:{"Content-Type":"application/json"},body:"{}"});
 assert.equal(passwordDenied.status,401);
-console.log("Production image: specification mail messages, thumbnail encoding, account/password contracts, health and authentication verified.");
+console.log("本番イメージのメール文面、サムネイル、管理者情報・パスワード、稼働状態と認証を確認しました。");
 '
 curl --fail --silent --show-error --max-time 20 https://anshin.info/health/ready >/dev/null
 curl --fail --silent --show-error --location --max-time 20 https://anshin.info/admin/login >/dev/null
 trap - ERR
 compose ps
-printf '%s\n' "DEPLOYMENT_OK: $release_tag" 'Existing consent documents unchanged.' "Backup directory: $backup_dir"
+printf '%s\n' "DEPLOYMENT_OK: $release_tag" '既存の同意文面は維持しています。' "バックアップ先：$backup_dir"

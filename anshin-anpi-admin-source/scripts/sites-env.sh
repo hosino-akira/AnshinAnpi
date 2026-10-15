@@ -20,16 +20,16 @@ export WRANGLER_WRITE_LOGS=false
 export WRANGLER_LOG_PATH="${runtime_root}/wrangler/logs"
 export MINIFLARE_REGISTRY_PATH="${runtime_root}/wrangler/registry"
 
-# The runtime may provide a global npm cache. Keep the image's read-only Sites
-# seed separate and make this project's writable cache authoritative.
+# 実行環境の共有 npm キャッシュと、イメージ内の読み取り専用キャッシュを分けます。
+# このプロジェクトの書き込み可能なキャッシュを優先して使用します。
 unset NPM_CONFIG_CACHE npm_config_cache || true
 export npm_config_cache="${runtime_root}/npm-cache"
 export npm_config_audit=false
 export npm_config_fund=false
 export npm_config_update_notifier=false
 
-# The runtime already supplies the standard HTTP(S)_PROXY variables. Remove
-# npm-specific aliases so npm 11 does not reinterpret or warn about them.
+# 実行環境が標準の HTTP(S)_PROXY を提供するため、npm 専用の別名を除去し、
+# npm 11 による再解釈や警告を防ぎます。
 unset \
   npm_config_proxy \
   npm_config_http_proxy \
@@ -44,7 +44,7 @@ if [[ "${1:-}" == "--" ]]; then
 fi
 
 if [[ "$#" -eq 0 ]]; then
-  echo "usage: scripts/sites-env.sh -- command [args...]" >&2
+  echo "使用方法：scripts/sites-env.sh -- コマンド [引数...]" >&2
   exit 64
 fi
 

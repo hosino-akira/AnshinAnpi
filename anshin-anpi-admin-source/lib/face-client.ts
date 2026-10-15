@@ -37,7 +37,7 @@ export type RegistrationInput = {
   imageBase64: string;
 };
 
-/** Local browser self-test client; Android calls the backend directly. */
+/** ローカルブラウザ向けの利用者 API クライアント。Android は API を直接呼び出します。 */
 export function createFaceClient(baseUrl = '/api/terminal') {
   const call = <T>(path: string, method = 'GET', body?: unknown, userId?: string, idempotencyKey?: string) =>
     faceApi<T>(path, method, body, userId, { baseUrl, idempotencyKey });

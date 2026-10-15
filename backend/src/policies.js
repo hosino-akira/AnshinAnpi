@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { fail } from './errors.js';
 
-// Policy text is deployment configuration, not user data or a separate table.
+// 同意文面の初期値は配布時の設定として読み込み、利用者データとは分けて管理します。
 export function loadPolicies() {
   const rows = JSON.parse(readFileSync(new URL('../config/consent-policies.json', import.meta.url), 'utf8'));
   for (const type of ['registration', 'safety']) {
     const current = rows.filter(row => row.consent_type === type && row.status === 'published');
     if (current.length !== 1 || !current[0].policy_version || !current[0].title || !current[0].body) {
-      throw new Error('Each consent type requires one published policy');
+      throw new Error('同意の種類ごとに公開済みの文面が 1 件必要です。');
     }
   }
   return rows;

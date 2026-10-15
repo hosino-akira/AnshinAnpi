@@ -101,7 +101,7 @@ export class AwsFaceProvider {
   }
   async search(image) {
     this.requireReady();
-    // An empty collection has no candidate; it is not a service outage.
+    // 空のコレクションは候補なしとして扱い、サービス障害とは判定しません。
     const collection = await this.call(new DescribeCollectionCommand({ CollectionId: this.config.collectionId }));
     if (collection.FaceCount === 0) {
       return { modelVersion: collection.FaceModelVersion ?? 'unknown', candidates: [] };

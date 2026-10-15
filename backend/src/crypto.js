@@ -25,7 +25,7 @@ function encrypt(key, value, purpose) {
 }
 
 function decrypt(key, envelope, purpose) {
-  if (envelope.v !== 1) throw new Error('Unsupported encryption envelope');
+  if (envelope.v !== 1) throw new Error('対応していない暗号化データ形式です。');
   const cipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'));
   cipher.setAAD(Buffer.from(`anshin-anpi:${purpose}`));
   cipher.setAuthTag(Buffer.from(envelope.tag, 'base64'));

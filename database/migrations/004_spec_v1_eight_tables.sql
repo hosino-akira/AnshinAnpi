@@ -6,16 +6,15 @@ SELECT EXISTS(SELECT 1 FROM app_meta.schema_migrations WHERE version='004_spec_v
 \if :already_applied
 \echo '004_spec_v1_eight_tables already applied; skipping.'
 \else
--- Apply only after a backup and exporting published policy text to configuration.
+-- バックアップと公開済み同意文面の設定への退避を済ませてから適用してください。
 CREATE SCHEMA migration_004_old;
 DO $$ DECLARE t text; BEGIN
  FOREACH t IN ARRAY ARRAY['facilities','terminals','users','consent_policies','consents','face_templates','recipients','face_verifications','safety_checks','mail_deliveries','mail_delivery_events','audit_logs','api_enrollments','api_sessions','api_idempotency','face_index_leases','face_cleanup_jobs'] LOOP
   EXECUTE format('ALTER TABLE public.%I SET SCHEMA migration_004_old',t);
  END LOOP;
 END; $$;
--- Physical implementation of development specification v1.0, section 10.1.
--- The names listed in the specification are preserved. Names, email and face
--- references remain encrypted bytea values using the existing application cipher.
+-- 業務テーブルを既定の名称で構築します。
+-- 氏名、メールアドレス、顔認証の参照情報は、既存の暗号化方式による bytea 値を維持します。
 CREATE TABLE terminals (
  terminal_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
  facility_id uuid NOT NULL,
@@ -120,7 +119,7 @@ DO $$ DECLARE t text; BEGIN
   EXECUTE format('CREATE TRIGGER updated_at BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION spec_touch_updated_at()',t);
  END LOOP;
 END; $$;
--- Keep external references until the existing mail worker deletes managed faces.
+-- 既存のメールワーカーが外部の顔情報を削除するまで参照情報を保持します。
 CREATE FUNCTION spec_suspend_user() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  IF NEW.status IN ('suspended','deleted') AND NEW.status IS DISTINCT FROM OLD.status THEN
@@ -156,7 +155,7 @@ INSERT INTO mail_deliveries(delivery_id,check_id,recipient_id,provider_message_i
 INSERT INTO audit_logs(log_id,actor_type,actor_id,action,target_type,target_id,result,occurred_at,error_code,request_id,terminal_id,retain_until,previous_entry_hmac,entry_hmac,signing_key_id)
  OVERRIDING SYSTEM VALUE SELECT log_id,actor_type,actor_id,action,target_type,target_id,result,occurred_at,error_code,request_id,terminal_id,retain_until,previous_entry_hmac,entry_hmac,signing_key_id FROM migration_004_old.audit_logs;
 SELECT setval(pg_get_serial_sequence('audit_logs','log_id'),COALESCE((SELECT max(log_id) FROM audit_logs),1),EXISTS(SELECT 1 FROM audit_logs));
--- All old data remains available in the pre-migration dump. No extra runtime tables.
+-- 旧データは適用前の DB バックアップで保持し、実行用の追加テーブルは残しません。
 DROP SCHEMA migration_004_old CASCADE;
 DROP FUNCTION IF EXISTS touch_updated_at(),validate_facility_timezone(),validate_consent_record(),protect_policy_content(),lock_recipient_owner(),require_active_user_recipient(),validate_new_safety_check(),validate_new_delivery(),protect_audit_logs(),erase_recipient_snapshots(),erase_user_references(),queue_external_face_cleanup(),revoke_user_api_access() CASCADE;
 INSERT INTO app_meta.schema_migrations(version) VALUES('004_spec_v1_eight_tables');

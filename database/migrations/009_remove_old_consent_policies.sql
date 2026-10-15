@@ -5,7 +5,7 @@ SELECT EXISTS(SELECT 1 FROM app_meta.schema_migrations WHERE version='009_remove
 \if :already_applied
 \echo '009_remove_old_consent_policies already applied; skipping.'
 \else
--- Remove obsolete policy documents; keep the current registration and safety versions.
+-- 不要な旧文面設定を削除し、現在の登録用・安否確認用の版を保持します。
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM app_meta.admin_settings WHERE setting_key='policy.registration.privacy-v2')
     OR NOT EXISTS (SELECT 1 FROM app_meta.admin_settings WHERE setting_key='policy.safety.safety-v1') THEN

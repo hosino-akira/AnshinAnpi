@@ -14,7 +14,7 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-// Packages Sites metadata after Vite finishes compiling.
+// Vite のコンパイル完了後に Sites の公開設定を生成物へ同梱します。
 export function sites(): Plugin {
   let root = process.cwd();
 

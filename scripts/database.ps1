@@ -8,13 +8,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-# psql input must remain UTF-8 in Windows PowerShell 5 as well as PowerShell 7.
+# Windows PowerShell 5 と PowerShell 7 の両方で、psql への入力を UTF-8 に保ちます。
 $previousOutputEncoding = $OutputEncoding
 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 function Invoke-DatabaseSql([string]$Sql) {
     $Sql | & docker compose --project-directory $projectRoot exec -T -e "TARGET_DATABASE=$Database" postgres sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "${TARGET_DATABASE:-$POSTGRES_DB}"'
-    if ($LASTEXITCODE -ne 0) { throw "Database command failed (exit $LASTEXITCODE)." }
+    if ($LASTEXITCODE -ne 0) { throw "DB コマンドが失敗しました（終了コード $LASTEXITCODE）。" }
 }
 
 try {
@@ -22,7 +22,7 @@ try {
         'migrate' {
             $migrationFiles = Get-ChildItem -LiteralPath (Join-Path $projectRoot 'database\migrations') -Filter '*.sql' | Sort-Object Name
             foreach ($migration in $migrationFiles) {
-                Write-Host "Applying $($migration.Name)"
+                Write-Host "$($migration.Name) を適用しています。"
                 Invoke-DatabaseSql (Get-Content -LiteralPath $migration.FullName -Raw -Encoding UTF8)
             }
         }

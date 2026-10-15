@@ -8,7 +8,7 @@ export async function updateCheck(db, checkId) {
   if (!checkId) return;
   const deliveries = (await db.query('SELECT status FROM mail_deliveries WHERE check_id=$1', [checkId])).rows;
   const statuses = deliveries.map(row => row.status);
-  const accepted = statuses.filter(status => ['accepted', 'delivered', 'bounced'].includes(status)).length;
+  const accepted = statuses.filter(status => ['accepted', 'delivered'].includes(status)).length;
   const pending = statuses.some(status => ['queued', 'sending'].includes(status));
   const status = pending ? 'processing' : statuses.includes('unknown') ? 'unknown'
     : accepted === statuses.length && accepted > 0 ? 'accepted' : accepted > 0 ? 'partially_accepted'
@@ -35,7 +35,7 @@ export class MailWorker {
     const metadata = (await this.pool.query('SELECT user_id,recipient_id,check_id FROM mail_deliveries WHERE delivery_id=$1', [id])).rows[0];
     if (!metadata) return;
     return transaction(this.pool, async db => {
-      // Parent -> check -> delivery lock order is shared with webhook processing.
+      // Webhook と同じく、利用者 → 確認記録 → 配信記録の順でロックします。
       const user = (await db.query('SELECT * FROM users WHERE user_id=$1 FOR SHARE', [metadata.user_id])).rows[0];
       const recipient = (await db.query('SELECT * FROM recipients WHERE recipient_id=$1 FOR SHARE', [metadata.recipient_id])).rows[0];
       const check = (await db.query('SELECT * FROM safety_checks WHERE check_id=$1 FOR UPDATE', [metadata.check_id])).rows[0];
@@ -50,7 +50,7 @@ export class MailWorker {
       const consent = check && (await db.query('SELECT * FROM consents WHERE consent_id=$1 FOR SHARE', [check.consent_id])).rows[0];
       const withdrawn = user && (await db.query(`SELECT 1 FROM consents WHERE user_id=$1 AND result='withdrawn'
         AND (consent_type='registration' OR consent_type=$2) AND consented_at >= $3 LIMIT 1`, [user.user_id, check?.check_type ?? 'safety', consent?.consented_at ?? new Date(0)])).rowCount;
-      // A contact registration notice does not authorize safety checks or resume service.
+      // 連絡先の登録通知では、安否確認の許可や利用再開を行いません。
       const userAllowed = check?.check_type === 'contact_change'
         ? ['active','pending_registration','suspended'].includes(user?.status)
         : user?.status === (check?.check_type === 'registration' && user?.status === 'pending_registration' ? 'pending_registration' : 'active');
@@ -83,7 +83,7 @@ export class MailWorker {
     });
   }
   async maintain() {
-    // Re-sending after a crashed provider request would risk a duplicate email.
+    // 送信要求中の異常終了後に自動再送すると重複するため、再送しません。
     const stale = (await this.pool.query(`SELECT delivery_id,check_id FROM mail_deliveries WHERE status='sending'
       AND sending_started_at < clock_timestamp()-interval '45 seconds'`)).rows;
     for (const row of stale) await transaction(this.pool, async db => {
@@ -112,7 +112,7 @@ export class MailWorker {
         this.lastMaintenance = Date.now();
         try { await this.cleanFaces(); }
         catch (error) { this.logger?.error({ errorCode:error.code ?? 'FACE_CLEANUP_FAILED' }, 'face_cleanup_failed'); }
-        // External features must be removed before the remaining DB references.
+        // 残りの DB 参照を消す前に、外部サービスの顔特徴を削除します。
         await this.pool.query(`DELETE FROM users u WHERE status='deleted' AND purge_after<=clock_timestamp()
           AND NOT EXISTS(SELECT 1 FROM face_templates f WHERE f.user_id=u.user_id AND f.status<>'deleted')`);
       }

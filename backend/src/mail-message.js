@@ -21,7 +21,7 @@ export function mailMessage(config, { displayName, recipientName, facilityName, 
     '確認日時': date,
     '施設名': facilityName ?? config.facilityName ?? 'ご利用施設',
   };
-  // Replace only template tokens, once; names containing tokens remain literal data.
+  // テンプレートの置換対象を一度だけ展開し、氏名に含まれる置換記号はそのまま扱います。
   const render = template => template.replace(/\{\{(送信先名|登録者名|確認日時|施設名)\}\}/g,
     (_, name) => variables[name]);
   const registration = type === 'registration';

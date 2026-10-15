@@ -7,10 +7,8 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "test": "node --test",
-    "test:mail-errors": "node --test test/mail-errors.test.js",
-    "test:mail-display": "node scripts/mail-error-fixtures.js seed",
-    "test:mail-display:clean": "node scripts/mail-error-fixtures.js clean",
+    "check:mail-bounces": "node scripts/mail-bounces.js --check",
+    "poll:mail-bounces": "node scripts/mail-bounces.js",
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "provision:admin": "node scripts/provision-admin.js"
@@ -23,6 +21,8 @@
     "@fastify/cors": "^11.0.0",
     "@fastify/helmet": "^13.0.0",
     "fastify": "^5.12.5",
+    "imapflow": "^2.4.2",
+    "mailparser": "^3.9.39",
     "nodemailer": "^10.0.14",
     "pg": "^8.0.0",
     "sharp": "^0.35.5",

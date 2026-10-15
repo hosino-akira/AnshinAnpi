@@ -8,19 +8,19 @@ if [[ "${SITES_ENV_READY:-}" != "1" ]]; then
 fi
 
 command -v flock || {
-  echo "install-ci.sh requires Linux flock." >&2
+  echo "install-ci.sh の実行には Linux の flock が必要です。" >&2
   exit 69
 }
 command -v timeout || {
-  echo "install-ci.sh requires GNU timeout." >&2
+  echo "install-ci.sh の実行には GNU timeout が必要です。" >&2
   exit 69
 }
 command -v curl || {
-  echo "install-ci.sh requires curl for the locked-tarball preflight." >&2
+  echo "固定した配布ファイルの事前確認に curl が必要です。" >&2
   exit 69
 }
 command -v sha256sum || {
-  echo "install-ci.sh requires sha256sum for cache and install verification." >&2
+  echo "キャッシュとインストールの検証に sha256sum が必要です。" >&2
   exit 69
 }
 
@@ -28,29 +28,29 @@ runtime_root="${SITES_PROJECT_ROOT}/.sites-runtime"
 expected_home="${runtime_root}/home"
 expected_cache="${runtime_root}/npm-cache"
 
-echo "[sites] validating writable install environment"
+echo "[sites] 書き込み可能なインストール環境を確認しています。"
 if [[ "${HOME}" != "${expected_home}" ]]; then
-  echo "Expected HOME=${expected_home}, got HOME=${HOME}." >&2
+  echo "HOME の想定値は ${expected_home}、現在の値は ${HOME} です。" >&2
   exit 78
 fi
 actual_cache="$(npm config get cache)"
 if [[ "${actual_cache}" != "${expected_cache}" ]]; then
-  echo "Expected npm cache ${expected_cache}, got ${actual_cache}." >&2
+  echo "npm キャッシュの想定値は ${expected_cache}、現在の値は ${actual_cache} です。" >&2
   exit 78
 fi
 touch "${HOME}/.sites-write-test" "${expected_cache}/.sites-write-test"
 rm -f "${HOME}/.sites-write-test" "${expected_cache}/.sites-write-test"
-echo "[sites] environment passed: HOME=${HOME}, cache=${expected_cache}"
+echo "[sites] 環境確認に成功しました：HOME=${HOME}、キャッシュ=${expected_cache}"
 
 lock_file="${runtime_root}/install.lock"
 exec 9>"${lock_file}"
 if ! flock -n 9; then
-  echo "Another dependency install is already running for ${SITES_PROJECT_ROOT}." >&2
+  echo "${SITES_PROJECT_ROOT} では依存関係のインストールが既に実行中です。" >&2
   exit 75
 fi
 
-# Catch an installer started outside this helper. Linux exposes both its command
-# line and working directory through /proc, so avoid broad process-name matches.
+# この補助スクリプト以外から起動したインストールも確認します。
+# Linux の /proc でコマンドと作業場所を確認し、プロセス名だけで判定しません。
 for process in /proc/[0-9]*; do
   pid="${process##*/}"
   [[ "${pid}" != "$$" && "${pid}" != "${PPID}" ]] || continue
@@ -58,7 +58,7 @@ for process in /proc/[0-9]*; do
   [[ "${process_cwd}" == "${SITES_PROJECT_ROOT}" ]] || continue
   process_command="$(tr '\0' ' ' <"${process}/cmdline" || true)"
   if [[ "${process_command}" == *"npm ci"* ]]; then
-    echo "Another npm ci is visible in ${SITES_PROJECT_ROOT}; refusing to overlap installs." >&2
+    echo "${SITES_PROJECT_ROOT} で別の npm ci を検出したため、重複実行を停止します。" >&2
     exit 75
   fi
 done
@@ -69,12 +69,12 @@ seed_cache="${SITES_NPM_CACHE_SEED:-}"
 if [[ -n "${seed_cache}" && -d "${seed_cache}" ]]; then
   seed_lockfile_sha256="$(cat "${seed_cache}/.sites-lockfile-sha256" || true)"
   if [[ "${seed_lockfile_sha256}" == "${lockfile_sha256}" ]]; then
-    echo "[sites] restoring image-seeded npm cache"
+    echo "[sites] イメージに同梱された npm キャッシュを復元しています。"
     cp -a "${seed_cache}/." "${expected_cache}/"
     use_seeded_cache=1
-    echo "[sites] image cache seed matched; registry fallback remains available"
+    echo "[sites] 同梱キャッシュが一致しました。必要に応じてレジストリーも使用します。"
   else
-    echo "[sites] image cache seed does not match this lockfile; using the network path"
+    echo "[sites] 同梱キャッシュとロックファイルが一致しないため、ネットワークから取得します。"
   fi
 fi
 
@@ -84,18 +84,18 @@ import { readFile } from "node:fs/promises";
 const lock = JSON.parse(await readFile(process.argv[2], "utf8"));
 const vinext = lock.packages?.["node_modules/vinext"];
 if (!vinext?.resolved || !vinext?.integrity) {
-  throw new Error("package-lock.json does not contain a resolved, integrity-pinned vinext tarball");
+  throw new Error("package-lock.json に取得先と整合性検証値が固定された vinext 配布ファイルがありません。");
 }
 console.log(vinext.resolved);
 console.log(vinext.integrity);
 NODE
 })" || {
-  echo "Could not read the integrity-pinned vinext tarball from package-lock.json." >&2
+  echo "package-lock.json から vinext の配布情報を読み取れませんでした。" >&2
   exit 65
 }
 mapfile -t locked_vinext <<<"${locked_vinext_output}"
 if [[ "${#locked_vinext[@]}" -ne 2 ]]; then
-  echo "Expected exactly one Vinext URL and integrity value from package-lock.json." >&2
+  echo "package-lock.json には vinext の URL と整合性検証値が 1 組必要です。" >&2
   exit 65
 fi
 
@@ -115,7 +115,7 @@ if (locked.hostname === "registry.npmjs.org") {
 process.stdout.write(locked.href);
 NODE
 })" || {
-  echo "Could not construct the locked-tarball preflight URL." >&2
+  echo "固定した配布ファイルの事前確認 URL を作成できませんでした。" >&2
   exit 65
   }
 
@@ -123,7 +123,7 @@ NODE
   preflight_tarball="${preflight_dir}/vinext.tgz"
   mkdir -p "${preflight_dir}"
 
-  echo "[sites] downloading the complete locked vinext tarball"
+  echo "[sites] 固定した vinext 配布ファイルを取得しています。"
   curl \
     --fail \
     --location \
@@ -135,26 +135,26 @@ NODE
     --output "${preflight_tarball}" \
     "${preflight_url}"
 
-  echo "[sites] verifying locked vinext tarball integrity"
+  echo "[sites] vinext 配布ファイルの整合性を検証しています。"
   node --input-type=module - "${preflight_tarball}" "${locked_integrity}" <<'NODE'
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 const [algorithm, expected] = process.argv[3].split("-", 2);
 if (!algorithm || !expected) {
-  throw new Error(`unsupported integrity value: ${process.argv[3]}`);
+  throw new Error(`対応していない整合性検証値です：${process.argv[3]}`);
 }
 const actual = createHash(algorithm)
   .update(await readFile(process.argv[2]))
   .digest("base64");
 if (actual !== expected) {
-  throw new Error(`vinext tarball integrity mismatch for ${algorithm}`);
+  throw new Error(`vinext 配布ファイルの ${algorithm} 検証値が一致しません。`);
 }
 NODE
-  echo "[sites] network and integrity preflight passed"
+  echo "[sites] ネットワークと整合性の事前確認に成功しました。"
 fi
 
-echo "[sites] running exactly one bounded npm ci"
+echo "[sites] 制限時間を設けて npm ci を 1 回実行します。"
 export NPM_CONFIG_MAXSOCKETS=1
 export NPM_CONFIG_FETCH_RETRIES=0
 export NPM_CONFIG_FETCH_TIMEOUT=30000
@@ -170,7 +170,7 @@ timeout \
 
 vinext="${SITES_PROJECT_ROOT}/node_modules/.bin/vinext"
 if [[ ! -x "${vinext}" ]]; then
-  echo "npm ci exited successfully but node_modules/.bin/vinext is unavailable." >&2
+  echo "npm ci は成功しましたが、node_modules/.bin/vinext が見つかりません。" >&2
   exit 69
 fi
 
@@ -186,4 +186,4 @@ await writeFile(
   }, null, 2)}\n`,
 );
 NODE
-echo "[sites] npm ci passed and vinext is available"
+echo "[sites] npm ci が成功し、vinext を使用できます。"

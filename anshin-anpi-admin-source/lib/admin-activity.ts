@@ -22,6 +22,8 @@ export function activityText(activity: Dashboard["activities"][number]): string 
     }
     case "admin.template.updated":
       return "送信メールのタイトルと本文を更新しました";
+    case "admin.mail_error.acknowledged":
+      return "メール送信エラーを確認済みにしました";
     case "admin.profile.updated":
       return "管理者の基本情報を更新しました";
     case "admin.password.updated":

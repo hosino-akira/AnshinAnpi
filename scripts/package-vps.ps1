@@ -6,10 +6,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $releaseDirectory = Join-Path $projectRoot "deploy/releases/$Tag"
-if (Test-Path -LiteralPath $releaseDirectory) { throw "Release already exists: $releaseDirectory" }
+if (Test-Path -LiteralPath $releaseDirectory) { throw "リリースが既に存在します：$releaseDirectory" }
 
 function Test-CommandExit {
-    if ($LASTEXITCODE -ne 0) { throw "Packaging command failed (exit $LASTEXITCODE)." }
+    if ($LASTEXITCODE -ne 0) { throw "配布パッケージの作成に失敗しました（終了コード $LASTEXITCODE）。" }
 }
 
 Push-Location $projectRoot
@@ -34,8 +34,8 @@ try {
     Test-CommandExit
     $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
     Set-Content -LiteralPath "$archive.sha256" -Value "$hash  $([System.IO.Path]::GetFileName($archive))" -Encoding ascii
-    Write-Host "Release tag: $Tag"
-    Write-Host "Deployment archive: $archive"
-    Write-Host 'The archive contains images, migrations, and configuration templates; fill the private production environment separately.'
+    Write-Host "リリースタグ：$Tag"
+    Write-Host "配布パッケージ：$archive"
+    Write-Host 'パッケージにはイメージ、DB 更新用 SQL、設定の雛形を含みます。本番の秘密情報は別途設定してください。'
 }
 finally { Pop-Location }

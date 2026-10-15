@@ -4,9 +4,9 @@ services:
     command: ["postgres", "-c", "timezone=UTC", "-c", "log_timezone=UTC"]
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
-      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?.env に POSTGRES_DB を設定してください}
+      POSTGRES_USER: ${POSTGRES_USER:?.env に POSTGRES_USER を設定してください}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?.env に POSTGRES_PASSWORD を設定してください}
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:

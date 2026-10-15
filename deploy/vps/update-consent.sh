@@ -17,7 +17,7 @@ sudo -v
 compose_dir=$(sudo docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$api_name")
 case "$compose_dir" in
   /home/debian/anshin-anpi/releases/*) ;;
-  *) echo 'Unexpected existing deployment path; stopped.' >&2; exit 1 ;;
+  *) echo '既存の配置先が想定と異なるため停止しました。' >&2; exit 1 ;;
 esac
 test -f "$compose_dir/compose.production.yaml"
 compose() {
@@ -36,20 +36,20 @@ new_admin=$(sudo docker image inspect --format '{{.Id}}' "anshin-anpi-admin:$rel
 
 backup_dir=$(mktemp -d /home/debian/.config/anshin-anpi/consent-deploy-backup.XXXXXXXX)
 cp -p -- "$runtime_env" "$backup_dir/runtime.env"
-printf '%s\n' "Backup directory: $backup_dir"
+printf '%s\n' "バックアップ先：$backup_dir"
 rollback() {
   deployment_status=$?
   trap - ERR
-  echo 'Deployment failed; restoring previous policy settings and application images.' >&2
+  echo '更新に失敗しました。直前の同意文面とアプリイメージを復元します。' >&2
   if test -s "$backup_dir/restore-policies.sql"; then
     database_sql < "$backup_dir/restore-policies.sql" || {
-      echo "Policy rollback failed. Database backup: $backup_dir/database.dump" >&2
+      echo "同意文面の復元に失敗しました。DB バックアップ：$backup_dir/database.dump" >&2
       exit 1
     }
   fi
   cp -p -- "$backup_dir/runtime.env" "$runtime_env"
   compose up -d --no-deps --pull never --force-recreate --wait --wait-timeout 120 api admin || {
-    echo "Application rollback needs attention. Backup directory: $backup_dir" >&2
+    echo "アプリの復元に失敗しました。バックアップ先：$backup_dir" >&2
     exit 1
   }
   exit "$deployment_status"
@@ -97,10 +97,10 @@ for (const expected of loadPolicies()) {
   assert.equal(actual.body, expected.body);
 }
 assert.ok(UserService.prototype.confirmRecipients.toString().includes("consentBody"));
-console.log("Current policy responses and backend name substitution code verified.");
+console.log("現在の同意文面と、API による氏名の置換処理を確認しました。");
 '
 curl --fail --silent --show-error --max-time 20 https://anshin.info/health/ready >/dev/null
 curl --fail --silent --show-error --location --max-time 20 https://anshin.info/admin/login >/dev/null
 trap - ERR
 compose ps
-printf '%s\n' "DEPLOYMENT_OK: $release_tag" 'Current policies only: privacy-v2, safety-v1.' "Backup directory: $backup_dir"
+printf '%s\n' "DEPLOYMENT_OK: $release_tag" '現在の同意文面：privacy-v2、safety-v1。' "バックアップ先：$backup_dir"

@@ -1,4 +1,4 @@
--- PostgreSQL 17. Apply with psql; each migration is atomic and recorded once.
+-- PostgreSQL 17 用です。psql で適用し、各更新を単一トランザクションで一度だけ記録します。
 \set ON_ERROR_STOP on
 BEGIN;
 SET LOCAL TIME ZONE 'UTC';
@@ -249,7 +249,7 @@ CREATE INDEX recipients_purge_idx ON recipients(purge_after) WHERE purge_after I
 COMMENT ON TABLE recipients IS '最大2件の連絡先。仕様のnameはencrypted_nameに対応。削除済みスロットは再利用できる。';
 COMMENT ON COLUMN recipients.email_lookup_hmac IS 'trim/lowerで正規化したメールのHMAC-SHA-256。重複排除用。全宛先で同じ有効検索鍵を使用。';
 
--- Serialize child changes through a real parent write, including at REPEATABLE READ.
+-- REPEATABLE READ を含め、親行の実更新を通じて子データの変更を順番に処理します。
 CREATE FUNCTION lock_recipient_owner() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE owner_id uuid;
 BEGIN
@@ -501,7 +501,7 @@ CREATE TRIGGER audit_logs_protect BEFORE UPDATE OR DELETE ON audit_logs
 CREATE TRIGGER audit_logs_no_truncate BEFORE TRUNCATE ON audit_logs
     FOR EACH STATEMENT EXECUTE FUNCTION protect_audit_logs();
 
--- Remove every retained copy of contact email when a recipient/user is physically erased.
+-- 連絡先または利用者を物理削除する際、保存済みのメールアドレスの複製もすべて消去します。
 CREATE FUNCTION erase_recipient_snapshots() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     UPDATE mail_deliveries SET encrypted_email_snapshot = NULL, encryption_key_id = NULL,
@@ -517,7 +517,7 @@ CREATE TRIGGER recipients_erase_snapshots BEFORE DELETE ON recipients
 
 CREATE FUNCTION erase_user_references() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    -- Clear composite references from leaf to parent before changing consent ownership.
+    -- 同意の所有者を変更する前に、末端から親の順で複合参照を解消します。
     UPDATE mail_deliveries SET user_id = NULL, encrypted_email_snapshot = NULL, encryption_key_id = NULL,
         snapshot_erased_at = clock_timestamp(),
         status = CASE WHEN status = 'queued' THEN 'cancelled' ELSE status END,

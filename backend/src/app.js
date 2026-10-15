@@ -36,7 +36,7 @@ export async function createApp(deps) {
     try { await pool.query('SELECT 1'); return { status: 'ready' }; }
     catch { return reply.code(503).send({ status: 'unavailable' }); }
   });
-  // SNS sends JSON with text/plain; no raw payload is logged or persisted.
+  // SNS は text/plain で JSON を送信します。受信本文をそのままログや DB に保存しません。
   app.addContentTypeParser('text/plain', { parseAs: 'string' }, (request, body, done) => {
     try { done(null, JSON.parse(body)); } catch (error) { done(error); }
   });
@@ -44,8 +44,8 @@ export async function createApp(deps) {
   const service = new UserService(deps);
   await registerAdmin(app, deps);
 
-  // Published policies are displayed before authentication; this route returns
-  // document content and version only, without private user records.
+  // 公開済みの同意文面は認証前に表示します。本文と版だけを返し、
+  // 利用者の個人情報は返しません。
   app.get('/v1/consent-policies', async (request, reply) => {
     reply.header('Access-Control-Allow-Origin', '*');
     const type = request.query.type;

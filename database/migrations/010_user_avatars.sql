@@ -5,7 +5,7 @@ SELECT EXISTS(SELECT 1 FROM app_meta.schema_migrations WHERE version='010_user_a
 \if :already_applied
 \echo '010_user_avatars already applied; skipping.'
 \else
--- Existing users intentionally keep NULL and continue showing the default icon.
+-- 既存の利用者は NULL のまま保持し、引き続き既定のアイコンを表示します。
 ALTER TABLE users ADD COLUMN encrypted_avatar bytea;
 COMMENT ON COLUMN users.encrypted_avatar IS 'Encrypted 96x96 JPEG thumbnail for authenticated admin lists only; no original photo.';
 ALTER TABLE users ADD CONSTRAINT users_deleted_avatar_empty CHECK(status<>'deleted' OR encrypted_avatar IS NULL);

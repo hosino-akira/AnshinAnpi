@@ -1,5 +1,5 @@
-// Public administrator messages follow the specification. Keep the original
-// delivery error_code in storage for diagnosis and retry decisions.
+// 管理画面のメッセージは所定の文面を使用します。診断と再試行の判断に使うため、
+// DB には元の配信 error_code を保持します。
 export function mailErrorDisplay(delivery) {
   const code = delivery.status === 'bounced' || delivery.error_code === 'MAIL-001' ? 'MAIL-001' : 'MAIL-002';
   return {

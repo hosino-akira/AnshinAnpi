@@ -3,7 +3,7 @@ import { fail } from './errors.js';
 
 export const AVATAR_SIZE = 96;
 
-// Work entirely in memory and strip source metadata; only the small JPEG survives.
+// メモリ内で画像を処理して元のメタデータを除去し、小さな JPEG だけを保存します。
 export async function createAvatar(image, bounds) {
   let oriented, thumbnail;
   try {

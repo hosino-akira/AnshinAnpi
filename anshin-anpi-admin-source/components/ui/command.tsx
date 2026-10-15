@@ -30,8 +30,8 @@ function Command({
 }
 
 function CommandDialog({
-  title = "Command Palette",
-  description = "Search for a command to run...",
+  title = "コマンド一覧",
+  description = "実行するコマンドを検索します…",
   children,
   className,
   showCloseButton = true,

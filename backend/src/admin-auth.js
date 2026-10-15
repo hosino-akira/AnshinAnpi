@@ -28,7 +28,7 @@ export class AdminAuth {
     return `${COOKIE_NAME}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${clear ? 0 : SESSION_TTL_SECONDS}${this.config.production ? '; Secure' : ''}`;
   }
   origin(request) {
-    // Browser requests must match the configured frontend origins. CLI requests have no Origin.
+    // ブラウザの Origin は設定済みの接続元に限定します。CLI からの要求には Origin がありません。
     const origin = request.headers.origin;
     if (origin && !this.config.corsOrigins.includes(origin)) fail(403, 'ADMIN_ORIGIN_REJECTED', 'この画面から操作できません。');
     if (!origin && request.headers['sec-fetch-site'] === 'cross-site') fail(403, 'ADMIN_ORIGIN_REJECTED', 'この画面から操作できません。');

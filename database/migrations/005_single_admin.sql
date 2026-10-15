@@ -5,7 +5,7 @@ SELECT EXISTS(SELECT 1 FROM app_meta.schema_migrations WHERE version='005_single
 \if :already_applied
 \echo '005_single_admin already applied; skipping.'
 \else
--- Single administrator and settings; the eight public business tables stay shared.
+-- 単一の管理者と管理設定を追加し、public の 8 業務テーブルは引き続き共用します。
 CREATE TABLE app_meta.administrator (
  singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
  name varchar(50) NOT NULL, email varchar(254) NOT NULL,
@@ -21,7 +21,7 @@ CREATE TABLE app_meta.admin_settings (
  updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 ALTER TABLE audit_logs ADD COLUMN reason varchar(20) CHECK(reason IN ('support','correction','suspension','deletion','audit'));
--- Corrections use the existing delivery worker rather than a second queue.
+-- 修正通知には既存の配信ワーカーを使い、別のキューは作成しません。
 ALTER TABLE safety_checks DROP CONSTRAINT safety_checks_check_type_check;
 ALTER TABLE safety_checks ADD CONSTRAINT safety_checks_check_type_check
  CHECK(check_type IN ('registration','safety','contact_change'));

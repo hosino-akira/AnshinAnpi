@@ -1,4 +1,4 @@
-// A same-origin proxy preserves HttpOnly cookies and does not expose the DB to browsers.
+// 同一オリジンのプロキシで HttpOnly Cookie を維持し、DB をブラウザへ公開しません。
 export async function proxyAdmin(request, backendUrl, fetchImpl = fetch) {
   const incoming = new URL(request.url);
   if (!incoming.pathname.startsWith('/api/admin/')) return null;
@@ -9,7 +9,7 @@ export async function proxyAdmin(request, backendUrl, fetchImpl = fetch) {
   if ((origin && origin !== incoming.origin) || request.headers.get('sec-fetch-site') === 'cross-site')
     return Response.json({error:{code:'ADMIN_ORIGIN_REJECTED',message:'この画面から操作できません。'}},{status:403});
   const path = incoming.pathname.slice('/api/admin'.length);
-  if (!/^\/(?:login|logout|session|profile|password|dashboard|settings|mail-template|policies\/registration|users(?:\/search|\/[0-9a-f-]{36}(?:\/(?:face|consent)|\/recipients\/[0-9a-f-]{36})?)?)$/.test(path))
+  if (!/^\/(?:login|logout|session|profile|password|dashboard|settings|mail-template|mail-errors\/[0-9a-f-]{36}\/acknowledge|policies\/registration|users(?:\/search|\/[0-9a-f-]{36}(?:\/(?:face|consent)|\/recipients\/[0-9a-f-]{36})?)?)$/.test(path))
     return Response.json({error:{code:'NOT_FOUND'}},{status:404});
   const headers = new Headers({'Content-Type':'application/json'});
   for (const name of ['cookie','x-csrf-token','idempotency-key','origin','sec-fetch-site']) {

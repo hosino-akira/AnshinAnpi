@@ -11,7 +11,7 @@ export async function idempotent(deps, request, reply, action, recover = null) {
   let committed = false; let locked = false;
   const lockKey = `${request.terminal.terminal_id}:${key}`;
   try {
-    // Hold the lock until COMMIT and the in-memory response state are both complete.
+    // COMMIT とメモリ内の応答状態の更新が完了するまでロックを保持します。
     await db.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [lockKey]); locked = true;
     await db.query('BEGIN');
     const previous = await deps.store.get('idempotency', lockKey);
@@ -23,8 +23,8 @@ export async function idempotent(deps, request, reply, action, recover = null) {
       reply.header('Idempotency-Replayed', 'true').code(previous.response_status);
       return result;
     }
-    // Mail operation IDs also have a persistent UNIQUE constraint. Process restart
-    // must never turn an already committed send into a second email batch.
+    // メール操作 ID は DB の UNIQUE 制約でも重複を防ぎます。プロセスの再起動後も、
+    // 確定済みの送信要求からメールを二重に作成しません。
     const send = (await db.query('SELECT * FROM safety_checks WHERE terminal_id=$1 AND idempotency_key=$2', [request.terminal.terminal_id,key])).rows[0];
     let result;
     if (send) {

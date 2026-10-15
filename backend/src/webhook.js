@@ -11,15 +11,15 @@ export function snsSigningText(message) {
   const names = message.Type === 'Notification'
     ? ['Message','MessageId', ...(message.Subject !== undefined ? ['Subject'] : []), 'Timestamp','TopicArn','Type']
     : ['Message','MessageId','SubscribeURL','Timestamp','Token','TopicArn','Type'];
-  if (names.some(name => typeof message[name] !== 'string')) fail(400, 'INVALID_WEBHOOK', 'Invalid notification');
+  if (names.some(name => typeof message[name] !== 'string')) fail(400, 'INVALID_WEBHOOK', '通知が無効です。');
   return names.map(name => `${name}\n${message[name]}\n`).join('');
 }
 export function validateCertificateUrl(value, region) {
   let url;
-  try { url = new URL(value); } catch { fail(401, 'INVALID_WEBHOOK_SIGNATURE', 'Invalid signing certificate'); }
+  try { url = new URL(value); } catch { fail(401, 'INVALID_WEBHOOK_SIGNATURE', '署名証明書が無効です。'); }
   if (url.protocol !== 'https:' || url.hostname !== `sns.${region}.amazonaws.com` || url.username || url.password
     || (url.port && url.port !== '443') || url.search || url.hash
-    || !/^\/SimpleNotificationService-[a-zA-Z0-9]+\.pem$/.test(url.pathname)) fail(401, 'INVALID_WEBHOOK_SIGNATURE', 'Invalid signing certificate');
+    || !/^\/SimpleNotificationService-[a-zA-Z0-9]+\.pem$/.test(url.pathname)) fail(401, 'INVALID_WEBHOOK_SIGNATURE', '署名証明書が無効です。');
   return url;
 }
 async function getCertificate(url) {
@@ -27,13 +27,13 @@ async function getCertificate(url) {
   if (cached && cached.until > Date.now()) return cached.pem;
   const pem = await new Promise((resolve, reject) => {
     const request = https.get(url, { timeout: 4000 }, response => {
-      if (response.statusCode !== 200) { response.resume(); reject(new Error('Certificate unavailable')); return; }
+      if (response.statusCode !== 200) { response.resume(); reject(new Error('署名証明書を取得できません。')); return; }
       const chunks = []; let size = 0;
-      response.on('data', chunk => { size += chunk.length; if (size > 16384) response.destroy(new Error('Certificate too large')); else chunks.push(chunk); });
+      response.on('data', chunk => { size += chunk.length; if (size > 16384) response.destroy(new Error('署名証明書のサイズが上限を超えています。')); else chunks.push(chunk); });
       response.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
       response.on('error', reject);
     });
-    request.on('timeout', () => request.destroy(new Error('Certificate timeout')));
+    request.on('timeout', () => request.destroy(new Error('署名証明書の取得がタイムアウトしました。')));
     request.on('error', reject);
   });
   if (certificates.size > 10) certificates.clear();
@@ -44,9 +44,9 @@ async function getCertificate(url) {
 export async function verifySns(message, config, certificateLoader = getCertificate) {
   if (!config.snsTopicArn) unavailable('メール配信通知');
   if (!message || message.TopicArn !== config.snsTopicArn || !['Notification','SubscriptionConfirmation'].includes(message.Type)
-    || !['1','2'].includes(message.SignatureVersion) || typeof message.Signature !== 'string') fail(401, 'INVALID_WEBHOOK_SIGNATURE', 'Invalid notification');
+    || !['1','2'].includes(message.SignatureVersion) || typeof message.Signature !== 'string') fail(401, 'INVALID_WEBHOOK_SIGNATURE', '通知が無効です。');
   const when = Date.parse(message.Timestamp);
-  if (!Number.isFinite(when) || Math.abs(Date.now() - when) > 900000) fail(401, 'WEBHOOK_EXPIRED', 'Expired notification');
+  if (!Number.isFinite(when) || Math.abs(Date.now() - when) > 900000) fail(401, 'WEBHOOK_EXPIRED', '通知の有効期限が切れています。');
   const region = config.snsTopicArn.split(':')[3];
   const url = validateCertificateUrl(message.SigningCertURL, region);
   let valid = false;
@@ -54,8 +54,8 @@ export async function verifySns(message, config, certificateLoader = getCertific
     const cert = await certificateLoader(url);
     valid = createVerify(message.SignatureVersion === '2' ? 'RSA-SHA256' : 'RSA-SHA1')
       .update(snsSigningText(message)).verify(cert, message.Signature, 'base64');
-  } catch { fail(401, 'INVALID_WEBHOOK_SIGNATURE', 'Invalid notification'); }
-  if (!valid) fail(401, 'INVALID_WEBHOOK_SIGNATURE', 'Invalid notification');
+  } catch { fail(401, 'INVALID_WEBHOOK_SIGNATURE', '通知が無効です。'); }
+  if (!valid) fail(401, 'INVALID_WEBHOOK_SIGNATURE', '通知が無効です。');
 }
 
 export function createWebhookHandler(deps) {
@@ -69,22 +69,22 @@ export function createWebhookHandler(deps) {
       return { confirmed: true };
     }
     let event;
-    try { event = JSON.parse(notification.Message); } catch { fail(400, 'INVALID_WEBHOOK', 'Invalid notification'); }
+    try { event = JSON.parse(notification.Message); } catch { fail(400, 'INVALID_WEBHOOK', '通知が無効です。'); }
     const eventMap = { Send: 'accepted', Delivery: 'delivered', Bounce: 'bounced', Complaint: 'complained', Reject: 'failed', RenderingFailure: 'failed' };
     const type = eventMap[event.eventType ?? event.notificationType];
     if (!type) return reply.code(204).send();
     const deliveryId = event.mail?.tags?.anshin_delivery_id?.[0];
     const messageId = event.mail?.messageId;
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deliveryId ?? '')
-      || typeof messageId !== 'string' || messageId.length > 255 || typeof notification.MessageId !== 'string' || notification.MessageId.length > 255) fail(400, 'INVALID_WEBHOOK', 'Invalid notification');
+      || typeof messageId !== 'string' || messageId.length > 255 || typeof notification.MessageId !== 'string' || notification.MessageId.length > 255) fail(400, 'INVALID_WEBHOOK', '通知が無効です。');
     const occurredAt = new Date(event.delivery?.timestamp ?? event.bounce?.timestamp ?? event.complaint?.timestamp ?? event.mail?.timestamp ?? notification.Timestamp);
-    if (!Number.isFinite(occurredAt.getTime()) || occurredAt.getTime() > Date.now() + 300000) fail(400, 'INVALID_WEBHOOK', 'Invalid notification');
+    if (!Number.isFinite(occurredAt.getTime()) || occurredAt.getTime() > Date.now() + 300000) fail(400, 'INVALID_WEBHOOK', '通知が無効です。');
     await transaction(deps.pool, async db => {
       const metadata = (await db.query('SELECT check_id FROM mail_deliveries WHERE delivery_id=$1 AND provider=$2', [deliveryId, deps.mail.name])).rows[0];
       if (!metadata) return;
       const check = metadata.check_id && (await db.query('SELECT * FROM safety_checks WHERE check_id=$1 FOR UPDATE', [metadata.check_id])).rows[0];
       const delivery = (await db.query('SELECT * FROM mail_deliveries WHERE delivery_id=$1 FOR UPDATE', [deliveryId])).rows[0];
-      if (delivery.provider_message_id && delivery.provider_message_id !== messageId) fail(409, 'WEBHOOK_MESSAGE_MISMATCH', 'Invalid notification');
+      if (delivery.provider_message_id && delivery.provider_message_id !== messageId) fail(409, 'WEBHOOK_MESSAGE_MISMATCH', '通知が無効です。');
       const replayKey = deps.store.key('webhook',`${deps.mail.name}:${notification.MessageId}`);
       if (await deps.store.state.exists(replayKey)) return;
       let next = delivery.status;

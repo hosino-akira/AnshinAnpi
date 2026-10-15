@@ -17,7 +17,7 @@ try {
   await transaction(runtime.pool,async db=> {
     await db.query('SELECT pg_advisory_xact_lock(17001004)');
     const exists=(await db.query('SELECT 1 FROM app_meta.administrator WHERE singleton')).rowCount;
-    if (exists && !values.reset) throw new Error('ADMIN_ALREADY_EXISTS: use --reset only to recover lost credentials');
+    if (exists && !values.reset) throw new Error('ADMIN_ALREADY_EXISTS: 認証情報を紛失した場合だけ --reset を使用してください。');
     const password=randomBytes(24).toString('base64url');
     await db.query(`INSERT INTO app_meta.administrator(name,email,password_hash) VALUES($1,$2,$3)
       ON CONFLICT(singleton) DO UPDATE SET name=EXCLUDED.name,email=EXCLUDED.email,password_hash=EXCLUDED.password_hash,
@@ -25,13 +25,13 @@ try {
       failed_attempts=0,locked_until=NULL,updated_at=clock_timestamp()`,[name,address,await passwordHash(password)]);
     await audit(db,runtime.config,{id:randomUUID(),admin:{email:address}},values.reset ? 'admin.credentials.reset' : 'admin.initialized','administrator','singleton');
     await writeFile(path,JSON.stringify({email:address,name,password,
-      instructions:'Sign in with your email and password. Store the password securely; delete this file after setup.'},null,2),
+      instructions:'メールアドレスとパスワードでログインしてください。パスワードを安全に保管し、初期設定後はこのファイルを削除してください。'},null,2),
       {encoding:'utf8',mode:0o600,flag:values.reset ? 'w' : 'wx'});
     wrote=true;
   });
-  console.log('Single administrator configured. Read backend/.admin-setup.json locally for your initial password. Credentials were not printed.');
+  console.log('管理者を設定しました。初期パスワードはローカルの backend/.admin-setup.json で確認してください。認証情報は画面に出力していません。');
 } catch(error) {
   if (wrote) await unlink(path).catch(()=>{});
-  console.error(error.code === 'EEXIST' ? 'SETUP_FILE_EXISTS: move the old setup file before initializing' : error.message.startsWith('ADMIN_ALREADY_EXISTS') ? error.message : 'ADMIN_INITIALIZATION_FAILED');
+  console.error(error.code === 'EEXIST' ? 'SETUP_FILE_EXISTS: 初期設定の前に古い設定ファイルを別の場所へ移してください。' : error.message.startsWith('ADMIN_ALREADY_EXISTS') ? error.message : 'ADMIN_INITIALIZATION_FAILED');
   process.exitCode=1;
 } finally { await runtime.close(); }

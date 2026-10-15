@@ -29,7 +29,7 @@ export function installErrorHandler(app) {
       ...(issue.expected ? { expected: issue.expected } : {}),
       ...(issue.keys ? { fields: issue.keys } : {}),
     })) } : undefined;
-    // Normal error logs omit private values; opt-in local exchange logs redact photos and secrets.
+    // 通常のエラーログに個人情報を含めず、開発用の詳細ログでも写真と秘密情報を遮蔽します。
     request.log[status >= 500 ? 'error' : 'info']({ requestId: request.id, errorCode: code, status }, 'request_failed');
     const details = error.details ?? validationDetails;
     reply.code(status).send({ error: { code, message, request_id: request.id, ...(details ? { details } : {}) } });

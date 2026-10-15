@@ -3,7 +3,7 @@ export class FaceApiError extends Error {
     public details?: Record<string, unknown>) { super(code); }
 }
 
-// The single robot uses user IDs; no device or user secrets are attached.
+// 単一ロボットは利用者 ID で操作し、端末や利用者の秘密情報を付加しません。
 export async function faceApi<T>(path: string, method = 'GET', body?: unknown, userId?: string,
   options: { baseUrl?: string; idempotencyKey?: string } = {}): Promise<T> {
   const target = `${(options.baseUrl ?? '/api/terminal').replace(/\/$/, '')}${path}`;

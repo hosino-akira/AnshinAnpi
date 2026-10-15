@@ -1,5 +1,5 @@
-// Single-process transient state. Restarting the API ends unfinished sessions.
-// Timers physically release expired entries, including temporary face images.
+// 単一プロセスの一時状態です。API の再起動で未完了のセッションは終了します。
+// タイマーにより、期限切れのデータと一時的な顔画像をメモリから解放します。
 export class MemoryState {
   constructor() { this.entries = new Map(); }
   async get(key) {

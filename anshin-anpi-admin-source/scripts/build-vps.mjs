@@ -8,5 +8,5 @@ const result = spawnSync(process.execPath, [
   env: { ...process.env, ANSHIN_BUILD_TARGET: 'vps' },
   stdio: 'inherit',
 });
-if (result.error) console.error('VPS_BUILD_FAILED: could not start vinext');
+if (result.error) console.error('VPS_BUILD_FAILED: vinext を起動できませんでした。');
 process.exitCode = result.status ?? 1;

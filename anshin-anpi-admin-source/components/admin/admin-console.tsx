@@ -270,7 +270,7 @@ function FacePhoto({
       aria-label={`${user.name}さん`}
     >
       {avatar && avatar !== failedAvatar ? (
-        // The API returns only a 96px thumbnail. It has no preview or link.
+        // API が返す 96px のサムネイルだけを表示し、拡大表示や画像リンクは提供しません。
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={avatar}
@@ -377,8 +377,9 @@ export default function AdminConsole() {
     useState<AdminSettings | null>(null);
   const [dashboard, setDashboard] =
     useState<Dashboard | null>(null);
+  const [acknowledgingErrorId, setAcknowledgingErrorId] = useState<string | null>(null);
   const [mailRevision, setMailRevision] = useState("");
-  const MAIL_ERRORS = (dashboard?.errors ?? []).map(
+  const MAIL_ERRORS = (dashboard?.errors ?? []).slice(0, 5).map(
     (error) => ({
       ...error,
       occurredAt: formatDate(error.occurredAt),
@@ -694,6 +695,27 @@ export default function AdminConsole() {
       showFlash("success", "最新のデータを読み込みました");
     } catch (error) {
       showFlash("error", errorText(error));
+    }
+  };
+
+  const acknowledgeMailError = async (id: string) => {
+    if (acknowledgingErrorId) return;
+    setAcknowledgingErrorId(id);
+    try {
+      await adminApi(`/mail-errors/${id}/acknowledge`, "POST");
+      setDashboard((current) => current ? {
+        ...current,
+        counts: { ...current.counts, errors: Math.max(0, current.counts.errors - 1) },
+        errors: current.errors.filter((error) => error.id !== id),
+      } : current);
+      const summary = await adminApi<Dashboard>("/dashboard");
+      setDashboard(summary);
+      setActivities(summary.activities);
+      showFlash("success", "メール送信エラーを確認済みにしました");
+    } catch (error) {
+      showFlash("error", errorText(error));
+    } finally {
+      setAcknowledgingErrorId(null);
     }
   };
 
@@ -1062,7 +1084,7 @@ export default function AdminConsole() {
             </div>
           </div>
           <div className="login-message">
-            <p>ADMIN CONSOLE</p>
+            <p>管理システム</p>
             <h1>管理者ログイン</h1>
             <span>
               登録者情報と安否確認の送信状況を安全に管理します。
@@ -1408,7 +1430,7 @@ export default function AdminConsole() {
                 selectView("dashboard");
                 showFlash(
                   "info",
-                  `最近の変更を${activities.length}件、メール送信エラーを${dashboard?.counts.errors ?? 0}件表示しています`,
+                  `最近の変更を${activities.length}件、メール送信エラーを${MAIL_ERRORS.length}件表示しています`,
                 );
               }}
             >
@@ -1432,7 +1454,7 @@ export default function AdminConsole() {
         <main className="admin-content">
           <div className="admin-page-head">
             <div>
-              <p>ADMINISTRATION</p>
+              <p>管理メニュー</p>
               <h1>{VIEW_COPY[view].title}</h1>
               <span>{VIEW_COPY[view].description}</span>
             </div>
@@ -1555,7 +1577,7 @@ export default function AdminConsole() {
               >
                 <div className="card-head">
                   <div>
-                    <p>DELIVERY ERRORS</p>
+                    <p>メール送信エラー</p>
                     <h2 id="mail-error-heading">
                       メール送信エラー
                     </h2>
@@ -1574,6 +1596,7 @@ export default function AdminConsole() {
                         <TableHead>送信先</TableHead>
                         <TableHead>エラー内容</TableHead>
                         <TableHead>状態</TableHead>
+                        <TableHead>操作</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1624,8 +1647,28 @@ export default function AdminConsole() {
                               要確認
                             </span>
                           </TableCell>
+                          <TableCell>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="mail-error-acknowledge"
+                              disabled={acknowledgingErrorId !== null}
+                              onClick={() => void acknowledgeMailError(error.id)}
+                              aria-label={`${error.recipientName}のメール送信エラーを確認済みにする`}
+                            >
+                              {acknowledgingErrorId === error.id ? "確認中…" : "確認済みにする"}
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       ))}
+                      {MAIL_ERRORS.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={6} className="mail-error-empty">
+                            未確認のメール送信エラーはありません
+                          </TableCell>
+                        </TableRow>
+                      )}
                     </TableBody>
                   </Table>
                 </div>
@@ -1635,7 +1678,7 @@ export default function AdminConsole() {
                 <section className="admin-card recent-users">
                   <div className="card-head">
                     <div>
-                      <p>REGISTERED USERS</p>
+                      <p>登録者</p>
                       <h2>最近の登録者</h2>
                     </div>
                     <Button
@@ -1652,7 +1695,7 @@ export default function AdminConsole() {
                   <section className="admin-card activity-card">
                     <div className="card-head">
                       <div>
-                        <p>ACTIVITY</p>
+                        <p>最近の操作</p>
                         <h2>最近の変更</h2>
                       </div>
                       <Activity aria-hidden="true" />
@@ -1929,7 +1972,7 @@ export default function AdminConsole() {
                 <section className="admin-card mail-template-editor">
                   <div className="editor-head">
                     <div>
-                      <p>DELIVERY MESSAGE</p>
+                      <p>送信メール</p>
                       <h2>家族へ配信するメール</h2>
                     </div>
                     <span
@@ -2017,7 +2060,7 @@ export default function AdminConsole() {
                       <MailOpen aria-hidden="true" />
                     </span>
                     <div>
-                      <p>LIVE PREVIEW</p>
+                      <p>表示プレビュー</p>
                       <h2>配信メールプレビュー</h2>
                     </div>
                   </div>
@@ -2117,7 +2160,7 @@ export default function AdminConsole() {
                 <section className="admin-card privacy-editor">
                   <div className="editor-head">
                     <div>
-                      <p>PRIVACY POLICY</p>
+                      <p>個人情報の取り扱い</p>
                       <h2>利用者に表示する文面</h2>
                     </div>
                     <div
@@ -2245,7 +2288,7 @@ export default function AdminConsole() {
                 <div className="profile-avatar">
                   <UserCog aria-hidden="true" />
                 </div>
-                <p>ADMINISTRATOR</p>
+                <p>管理者</p>
                 <h2>{adminAccount.name}</h2>
                 <span>{adminAccount.email}</span>
                 <dl>
@@ -2276,7 +2319,7 @@ export default function AdminConsole() {
               >
                 <div className="account-form-head">
                   <div>
-                    <p>ACCOUNT SETTINGS</p>
+                    <p>アカウント設定</p>
                     <h2>管理者情報を変更</h2>
                   </div>
                   <ShieldCheck aria-hidden="true" />

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 export const REQUEST_LOG_PATH = fileURLToPath(new URL('../logs/api-requests.jsonl', import.meta.url));
 const secretKey = /token|password|secret|authorization|cookie|credential|signature|api[_-]?key/i;
 
-// Local development exchanges retain business fields, but never photos or credentials.
+// ローカル開発の詳細ログには業務項目を残しますが、写真と認証情報は残しません。
 export function sanitizeExchange(value, key = '') {
   if (secretKey.test(key)) return '[REDACTED]';
   if (key === 'image_base64') {

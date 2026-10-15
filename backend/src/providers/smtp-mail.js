@@ -5,7 +5,7 @@ import { mailMessage } from '../mail-message.js';
 export function smtpOptions(config) {
   return {
     host: config.smtpHost, port: config.smtpPort, secure: config.smtpSecure,
-    // Port 587 upgrades with STARTTLS; never continue with plaintext authentication.
+    // ポート 587 では STARTTLS を必須とし、平文で認証を続行しません。
     requireTLS: !config.smtpSecure,
     tls: { rejectUnauthorized: true },
     auth: { user: config.smtpUser, pass: config.smtpPassword },
@@ -25,7 +25,7 @@ export function smtpFailure(error) {
     return new MailFailure('MAIL-001');
   if (['EDNS', 'ECONNECTION'].includes(error.code) || (['ESOCKET', 'ETIMEDOUT'].includes(error.code) && error.command === 'CONN'))
     return new MailFailure('MAIL-002', { retryable: true });
-  // A dropped connection during DATA may have happened after the server accepted it.
+  // DATA 送信中に接続が切れた場合でも、サーバーが既に受理している可能性があります。
   return new MailFailure('MAIL_RESULT_UNKNOWN', { uncertain: true });
 }
 
@@ -44,14 +44,15 @@ export class SmtpMailProvider {
   async send(message) {
     if (!this.ready) throw new MailFailure('MAIL_CONFIG_REQUIRED');
     const content = mailMessage(this.config, message);
-    // The same delivery retains its Message-ID on an explicit retry. This is not
-    // an SMTP idempotency guarantee; uncertain outcomes are still never retried.
+    // 明示的な再送では同じ配信の Message-ID を維持します。ただし SMTP の冪等性は
+    // 保証されないため、送信結果が不明な場合は再送しません。
     const messageId = `<${message.deliveryId}@${this.config.smtpFrom.split('@')[1]}>`;
     try {
       const result = await this.transport.sendMail({
         from: { name: '安心安否確認', address: this.config.smtpFrom },
         to: [{ address: message.email }],
         envelope: { from: this.config.smtpFrom, to: [message.email] },
+        ...(this.config.bounceEnabled ? { dsn: { id: message.deliveryId, return: 'headers', notify: ['failure', 'delay'] } } : {}),
         ...(this.config.smtpReplyTo ? { replyTo: this.config.smtpReplyTo } : {}),
         subject: content.subject, text: content.text, date: new Date(message.occurredAt), messageId,
         headers: { 'X-Anshin-Delivery-Id': message.deliveryId, 'Auto-Submitted': 'auto-generated' },

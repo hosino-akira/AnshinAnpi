@@ -10,7 +10,7 @@ const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
 
 const { d1, r2 } = hostingConfig;
 
-// macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
+// macOS の Seatbelt 環境では FSEvents が制限されるため、更新検知にポーリングを使います。
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
 const localBindingConfig = {
@@ -42,13 +42,13 @@ export default defineConfig(async ({ command, mode }) => {
 
   const localEnv = loadEnv(mode, process.cwd(), "ANSHIN_");
   const localFaceEnabled = command === "serve" && localEnv.ANSHIN_DEV_FACE_ENABLED === "true";
-  // Keep Wrangler and Miniflare state project-local. These are non-secret tool
-  // settings; application environment belongs in ignored `.env*` files.
+  // Wrangler と Miniflare の作業データをプロジェクト内に置きます。
+  // アプリの環境変数は Git 管理外の .env ファイルに保存します。
   process.env.WRANGLER_WRITE_LOGS ??= "false";
   process.env.WRANGLER_LOG_PATH ??= ".wrangler/logs";
   process.env.MINIFLARE_REGISTRY_PATH ??= ".wrangler/registry";
 
-  // Wrangler snapshots its log path while the Cloudflare plugin is imported.
+  // Cloudflare プラグインの読み込み時に Wrangler のログ保存先が確定します。
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {

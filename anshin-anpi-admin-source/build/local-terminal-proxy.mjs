@@ -1,4 +1,4 @@
-// Development-only proxy for the fixed single robot; no device credentials are required.
+// 固定の単一ロボット向けの開発用プロキシです。端末の認証情報は使用しません。
 export function createTerminalMiddleware({ backendUrl, fetchImpl = fetch }) {
   const target = new URL(backendUrl);
   if (!['127.0.0.1', 'localhost', '[::1]'].includes(target.hostname)

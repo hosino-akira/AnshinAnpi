@@ -5,7 +5,7 @@ SELECT EXISTS(SELECT 1 FROM app_meta.schema_migrations WHERE version='008_safety
 \if :already_applied
 \echo '008_safety_consent_template already applied; skipping.'
 \else
--- Keep historical consent versions; substitute the verified user's name at response time.
+-- 過去の同意文面を保持し、本人確認済みの氏名を応答時に置換します。
 INSERT INTO app_meta.admin_settings(setting_key,document)
 VALUES ('policy.safety.safety-v1','{"consent_type":"safety","policy_version":"safety-v1","title":"安否確認メールの送信内容","body":"{{登録者名}}さんが、安否確認操作を行いました。\n本人の操作により送信された自動メールです。","status":"published","requires_reconsent":false,"effective_date":"2026-10-08"}'::jsonb)
 ON CONFLICT (setting_key) DO NOTHING;
