@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-# sudo で実行します。アプリと顔サムネイル用の DB 項目を更新し、同意文面は維持します。
+# sudo で実行します。アプリと追加の DB 項目を更新し、同意文面を維持します。
 test "$(id -u)" -eq 0
 release_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 release_tag=$(tr -d '\r\n' < "$release_dir/release-tag.txt")
@@ -14,6 +14,7 @@ database_name=anshin-vps-postgres-1
 test -f "$runtime_env"
 test -f "$release_dir/images.tar"
 test -f "$release_dir/database/migrations/010_user_avatars.sql"
+test -f "$release_dir/database/migrations/011_mail_error_acknowledgement.sql"
 compose_dir=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$api_name")
 case "$compose_dir" in /home/debian/anshin-anpi/releases/*) ;; *) echo '配置先が想定と異なります。' >&2; exit 1 ;; esac
 compose() { docker compose --env-file "$runtime_env" -f "$compose_dir/compose.production.yaml" "$@"; }
@@ -35,6 +36,7 @@ new_api=$(docker image inspect --format '{{.Id}}' "anshin-anpi-api:$release_tag"
 new_admin=$(docker image inspect --format '{{.Id}}' "anshin-anpi-admin:$release_tag")
 backup_dir=$(mktemp -d /home/debian/.config/anshin-anpi/app-deploy-backup.XXXXXXXX)
 cp -p -- "$runtime_env" "$backup_dir/runtime.env"
+cp -p -- "$compose_dir/compose.production.yaml" "$backup_dir/compose.production.yaml"
 printf '%s\n' "バックアップ先：$backup_dir"
 rollback() {
   deployment_status=$?
@@ -53,11 +55,33 @@ compose stop api admin
 docker exec "$database_name" sh -c 'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$backup_dir/database.dump"
 test -s "$backup_dir/database.dump"
 database_sql < "$release_dir/database/migrations/010_user_avatars.sql"
+database_sql < "$release_dir/database/migrations/011_mail_error_acknowledgement.sql"
 if test "$avatar_schema_before" = f; then
   test "$(database_sql -At -c "SELECT count(*) FROM users WHERE encrypted_avatar IS NOT NULL;")" = 0
 fi
 test "$(policy_digest)" = "$policies_before"
-sed -i "s/^VPS_IMAGE_TAG=.*/VPS_IMAGE_TAG=$release_tag/" "$runtime_env"
+python3 - "$runtime_env" "$release_tag" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+updates = {
+    'VPS_IMAGE_TAG': sys.argv[2],
+    'MAIL_BOUNCE_ENABLED': 'true',
+    'MAIL_BOUNCE_IMAP_PORT': '993',
+    'MAIL_BOUNCE_POLL_SECONDS': '60',
+    'MAIL_BOUNCE_LOOKBACK_DAYS': '7',
+}
+lines = p.read_text().splitlines()
+for key, value in updates.items():
+    matches = [i for i, line in enumerate(lines) if line.startswith(key + '=')]
+    if len(matches) > 1:
+        raise SystemExit('環境変数の設定が重複しています：' + key)
+    if matches:
+        lines[matches[0]] = key + '=' + value
+    else:
+        lines.append(key + '=' + value)
+p.write_text('\n'.join(lines) + '\n')
+PY
 chmod 600 "$runtime_env"
 chown --reference="$backup_dir/runtime.env" "$runtime_env"
 compose config --quiet
@@ -66,6 +90,8 @@ test "$(docker inspect --format '{{.Image}}' "$api_name")" = "$new_api"
 test "$(docker inspect --format '{{.Image}}' "$admin_name")" = "$new_admin"
 test "$(docker inspect --format '{{.Id}} {{.State.StartedAt}}' "$database_name")" = "$database_before"
 test "$(policy_digest)" = "$policies_before"
+docker exec "$api_name" node scripts/mail-bounces.js --check
+database_sql -At -c "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='mail_deliveries' AND column_name='error_acknowledged_at');" | grep -qx t
 docker exec "$api_name" node --input-type=module -e '
 import assert from "node:assert/strict";
 import sharp from "sharp";
@@ -92,5 +118,10 @@ console.log("本番イメージのメール文面、サムネイル、管理者�
 curl --fail --silent --show-error --max-time 20 https://anshin.info/health/ready >/dev/null
 curl --fail --silent --show-error --location --max-time 20 https://anshin.info/admin/login >/dev/null
 trap - ERR
+# PostgreSQL の初期化用マウント先にも最新の SQL を保持します。
+cp -p -- "$release_dir/database/migrations/011_mail_error_acknowledgement.sql" "$compose_dir/database/migrations/011_mail_error_acknowledgement.sql"
+if test -f "$release_dir/README.md"; then
+  install -m 644 "$release_dir/README.md" /home/debian/anshin-anpi/README.md
+fi
 compose ps
 printf '%s\n' "DEPLOYMENT_OK: $release_tag" '既存の同意文面は維持しています。' "バックアップ先：$backup_dir"
