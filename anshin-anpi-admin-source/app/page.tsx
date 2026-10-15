@@ -60,6 +60,7 @@ import {
 } from "@/lib/face-client";
 import { FaceApiError } from "@/lib/face-api";
 import { PolicyContent } from "@/components/policy-content";
+import { recipientAvailability } from "@/lib/recipient-status";
 
 const faceClient = createFaceClient();
 
@@ -583,14 +584,16 @@ function RecipientCard({
   name,
   email,
   status,
+  unavailable = false,
 }: {
   name: string;
   email: string;
   status?: "success" | "failed";
+  unavailable?: boolean;
 }) {
   return (
     <div
-      className={`recipient-card ${status ? `result-${status}` : ""}`}
+      className={`recipient-card ${unavailable ? "result-failed" : status ? `result-${status}` : ""}`}
     >
       <span className="recipient-avatar">
         <UserRound aria-hidden="true" />
@@ -600,6 +603,9 @@ function RecipientCard({
         <strong>{name}</strong>
         <span>{maskEmail(email)}</span>
       </div>
+      {unavailable && (
+        <span className="result-pill failed"><CircleAlert aria-hidden="true" />送信不可</span>
+      )}
       {status === "success" && (
         <span className="result-pill">
           <CheckCircle2 aria-hidden="true" />
@@ -663,6 +669,7 @@ export default function Home() {
         ReturnType<typeof faceClient.confirmRecipients>
       >
     >();
+  const safetyAvailability = recipientAvailability(safetyContacts?.recipients ?? []);
   const faceDraft = useRef<string | undefined>(undefined);
   const faceSession = useRef<UserSession | undefined>(
     undefined,
@@ -785,6 +792,21 @@ export default function Home() {
       await action(checkActive);
     } catch (cause) {
       if (version !== operationVersion.current) return;
+      if (cause instanceof FaceApiError && cause.code === "NO_ACTIVE_RECIPIENT") {
+        // 確認後に宛先が削除・要修正になった場合も、理由を表示して送信先画面へ戻します。
+        setSafetyContacts(undefined);
+        setScreen("SCR-12");
+        setFaceError("送信先をご確認ください。スタッフへお声がけください。");
+        const userId = faceSession.current?.user_id;
+        if (userId) {
+          try {
+            const refreshed = await faceClient.confirmRecipients(userId, true);
+            checkActive();
+            setSafetyContacts(refreshed);
+          } catch { /* 再取得に失敗しても送信は許可しません。 */ }
+        }
+        return;
+      }
       if (label === "安否通知を受け付けています") { goHome(); return; }
       if (cause instanceof FaceApiError) {
         const messages: Record<string, string> = {
@@ -980,6 +1002,8 @@ export default function Home() {
           !safetyContacts?.policy_version
         )
           throw new Error("本人確認と送信への同意を行ってください。");
+        if (safetyAvailability.availableCount === 0)
+          throw new FaceApiError("NO_ACTIVE_RECIPIENT", 409);
         const result = await faceClient.notifySafety(
           current.user_id,
           true,
@@ -1681,8 +1705,9 @@ export default function Home() {
               <div>
                 <small>今回の送信先</small>
                 <strong>
-                  {safetyContacts?.recipients.length ?? 0}
-                  名へ送信します
+                  {safetyAvailability.availableCount > 0
+                    ? `${safetyAvailability.availableCount}名へ送信します`
+                    : "送信できません"}
                 </strong>
               </div>
             </div>
@@ -1693,10 +1718,22 @@ export default function Home() {
                     key={recipient.recipient_id}
                     name={recipient.name}
                     email={recipient.masked_email}
+                    unavailable={recipient.status !== "active"}
                   />
                 ),
               )}
             </div>
+            {safetyAvailability.warning ? (
+              <Notice tone="warning">
+                <strong>{safetyAvailability.warning}</strong>
+                <span>スタッフへお声がけください。</span>
+              </Notice>
+            ) : safetyAvailability.unavailableCount > 0 ? (
+              <Notice tone="warning">
+                <strong>送信できない宛先があります</strong>
+                <span>「送信不可」の宛先には送信しません。</span>
+              </Notice>
+            ) : null}
             <Notice tone="warning">
               <strong>
                 このサービスは緊急通報ではありません
@@ -1712,6 +1749,7 @@ export default function Home() {
                 <Button
                   className="touch-button primary-button"
                   onClick={() => setScreen("SCR-13")}
+                  disabled={safetyAvailability.availableCount === 0}
                 >
                   安否確認メールを送る
                   <ChevronRight />
@@ -1726,8 +1764,16 @@ export default function Home() {
             <ScreenTitle
               kicker="安否確認 4 / 5"
               title="送信内容をご確認ください"
-              description={`同意して送信ボタンを押すと、登録済みの${safetyContacts?.recipients.length ?? 0}名へそれぞれ1通ずつ送信します。`}
+              description={`同意して送信ボタンを押すと、有効な送信先${safetyAvailability.availableCount}名へそれぞれ1通ずつ送信します。`}
             />
+            <div className="result-list">
+              {(safetyContacts?.recipients ?? []).map((recipient) => (
+                <RecipientCard key={recipient.recipient_id} name={recipient.name} email={recipient.masked_email} unavailable={recipient.status !== "active"} />
+              ))}
+            </div>
+            {safetyAvailability.unavailableCount > 0 && (
+              <Notice tone="warning"><span>「送信不可」の宛先には送信しません。</span></Notice>
+            )}
             <section className="mail-preview">
               <div className="mail-preview-head">
                 <Mail />
@@ -1771,7 +1817,7 @@ export default function Home() {
               primary={
                 <Button
                   className="touch-button primary-button send-button"
-                  disabled={!sendAgreed}
+                  disabled={!sendAgreed || safetyAvailability.availableCount === 0}
                   onClick={() => void sendSafetyMail()}
                 >
                   <ShieldCheck />

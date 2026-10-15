@@ -380,6 +380,7 @@
 .recipient-slot > div:nth-child(2) { min-width: 0; display: grid; }
 .recipient-slot strong { font-size: 12px; }
 .recipient-slot small { overflow: hidden; color: var(--admin-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.recipient-warning { margin: 4px 0 0; color: #a33116; font-size: 12px; font-weight: 700; line-height: 1.6; }
 .recipient-slot > div:last-child { display: flex; gap: 3px; }
 .recipient-slot button { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 8px; color: #486474; background: transparent; cursor: pointer; }
 .recipient-slot button:hover { background: #e8eff3; }

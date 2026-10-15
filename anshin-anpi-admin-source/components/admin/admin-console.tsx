@@ -97,6 +97,7 @@ import {
 } from "@/lib/admin-api";
 import Link from "next/link";
 import { activityText, activityTime } from "@/lib/admin-activity";
+import { recipientAvailability, recipientStatusLabel } from "@/lib/recipient-status";
 import { usePathname, useRouter } from "next/navigation";
 import {
   ADMIN_LOGIN_PATH,
@@ -115,6 +116,7 @@ type Recipient = {
   id: string;
   name: string;
   email: string;
+  status: string;
 };
 type AdminAccount = {
   name: string;
@@ -764,7 +766,7 @@ export default function AdminConsole() {
         ...current,
         recipients: [
           ...current.recipients,
-          { id: `REC-${Date.now()}`, name: "", email: "" },
+          { id: `REC-${Date.now()}`, name: "", email: "", status: "active" },
         ],
       };
     });
@@ -783,12 +785,6 @@ export default function AdminConsole() {
     );
     if (!trimmedName) {
       setFormError("登録者名を入力してください。");
-      return;
-    }
-    if (recipients.length === 0) {
-      setFormError(
-        "メール送信先を1件以上登録してください。",
-      );
       return;
     }
     if (
@@ -1260,6 +1256,9 @@ export default function AdminConsole() {
                   {user.recipients.length}
                 </strong>
                 <span className="muted-copy"> / 2件</span>
+                {recipientAvailability(user.recipients).warning && (
+                  <p className="recipient-warning">{recipientAvailability(user.recipients).warning}</p>
+                )}
               </TableCell>
               <TableCell>
                 <div className="date-cell">
@@ -1861,6 +1860,9 @@ export default function AdminConsole() {
                       <StatusBadge status={user.status} />
                     </div>
                     <div className="recipient-slots">
+                      {recipientAvailability(user.recipients).warning && (
+                        <p className="recipient-warning" role="status">{recipientAvailability(user.recipients).warning}</p>
+                      )}
                       {[0, 1].map((slot) => {
                         const recipient =
                           user.recipients[slot];
@@ -1877,6 +1879,9 @@ export default function AdminConsole() {
                               <small>
                                 {recipient.email}
                               </small>
+                              {recipientStatusLabel(recipient.status) && (
+                                <span className="recipient-warning">{recipientStatusLabel(recipient.status)}</span>
+                              )}
                             </div>
                             <div>
                               <button
@@ -1920,6 +1925,7 @@ export default function AdminConsole() {
                                     id: `REC-${Date.now()}`,
                                     name: "",
                                     email: "",
+                                    status: "active",
                                   },
                                 ],
                               })
@@ -2774,7 +2780,7 @@ export default function AdminConsole() {
                   <div>
                     <h3>メール送信先</h3>
                     <p>
-                      1件必須、最大2件まで登録できます。
+                      最大2件。送信には有効な送信先が必要です。
                     </p>
                   </div>
                   <span>
@@ -2782,6 +2788,9 @@ export default function AdminConsole() {
                   </span>
                 </div>
                 <div className="sheet-recipients">
+                  {recipientAvailability(editingUser.recipients).warning && (
+                    <p className="recipient-warning" role="status">{recipientAvailability(editingUser.recipients).warning}</p>
+                  )}
                   {editingUser.recipients.map(
                     (recipient, index) => (
                       <div
@@ -2846,6 +2855,9 @@ export default function AdminConsole() {
                                 )
                               }
                             />
+                            {recipientStatusLabel(recipient.status) && (
+                              <p className="recipient-warning">{recipientStatusLabel(recipient.status)}：メールアドレスをご確認ください。</p>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -2866,7 +2878,7 @@ export default function AdminConsole() {
                             : "2件目の送信先を追加"}
                         </strong>
                         <small>
-                          1件必須、最大2件まで登録できます
+                          最大2件まで登録できます
                         </small>
                       </span>
                     </button>

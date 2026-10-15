@@ -20,7 +20,7 @@ export const adminSchemas = {
   profile: z.strictObject({ name: displayName, email }),
   passwordChange: z.strictObject({ current_password: password, new_password: password }),
   user: z.strictObject({ name: displayName, status: z.enum(['active','suspended','pending_registration']),
-    recipients: z.array(contact).min(1).max(2).refine(rows => new Set(rows.map(x => x.email)).size === rows.length, '送信先が重複しています。'),
+    recipients: z.array(contact).max(2).refine(rows => new Set(rows.map(x => x.email)).size === rows.length, '送信先が重複しています。'),
     expected_revision: revision, identity_confirmed: z.literal(true), reset_face: z.boolean().default(false), reason }),
   deletion: z.strictObject({ expected_revision: revision, reason: z.literal('deletion') }),
   search: z.strictObject({ name: displayName, reason }),
@@ -177,8 +177,7 @@ export class AdminService {
       const targetStatus = body.reset_face ? 'suspended' : body.status;
       if (targetStatus === 'active' && !(await db.query("SELECT 1 FROM face_templates WHERE user_id=$1 AND status='active'",[user.user_id])).rowCount)
         fail(409,'FACE_REENROLLMENT_REQUIRED','本人立会いで顔を再登録してください。');
-      if (targetStatus === 'active' && !(await db.query("SELECT 1 FROM recipients WHERE user_id=$1 AND status='active'",[user.user_id])).rowCount)
-        fail(409,'NO_ACTIVE_RECIPIENT','有効な送信先を登録してください。');
+      // 連絡先の不備では利用停止・顔無効化を行わず、送信時に有効な宛先を確認します。
       await db.query(`UPDATE users SET display_name=$2,status=$3::varchar,suspended_at=CASE WHEN $3::varchar='suspended' THEN clock_timestamp() ELSE NULL END WHERE user_id=$1`,
         [user.user_id,await this.cipher.seal(body.name,'user-name'),targetStatus]);
       if (body.reset_face) {
@@ -213,9 +212,7 @@ export class AdminService {
       const recipient=(await db.query("SELECT recipient_id FROM recipients WHERE recipient_id=$1 AND user_id=$2 AND status<>'deleted' FOR UPDATE",[request.params.recipientId,user.user_id])).rows[0];
       if (!recipient) fail(404,'NOT_FOUND','送信先が見つかりません。');
       await this.eraseRecipient(db,recipient.recipient_id);
-      if (!(await db.query("SELECT 1 FROM recipients WHERE user_id=$1 AND status='active'",[user.user_id])).rowCount)
-        await db.query("UPDATE users SET status='suspended',suspended_at=clock_timestamp() WHERE user_id=$1",[user.user_id]);
-      else await db.query('UPDATE users SET updated_at=clock_timestamp() WHERE user_id=$1',[user.user_id]);
+      await db.query('UPDATE users SET updated_at=clock_timestamp() WHERE user_id=$1',[user.user_id]);
       await audit(db,this.config,request,'admin.recipient.deleted','recipient',recipient.recipient_id);
       return { user:await this.serialize(db,await this.user(db,user.user_id)) };
     });
