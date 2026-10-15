@@ -5,6 +5,18 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const messageIdPattern = /^<([0-9a-f-]{36})@([a-z0-9.-]+)>$/i;
 const parserOptions = { keepDeliveryStatus: true, skipHtmlToText: true, skipTextToHtml: true, skipImageLinks: true };
 
+function isDeliveryStatusReport(mail) {
+  const contentType = mail.headers.get('content-type');
+  return contentType?.value?.toLowerCase() === 'multipart/report'
+    && contentType.params?.['report-type']?.toLowerCase() === 'delivery-status';
+}
+
+export async function isBounceReportHeader(headers) {
+  if (!Buffer.isBuffer(headers) || headers.length > MAX_BOUNCE_BYTES) return false;
+  try { return isDeliveryStatusReport(await simpleParser(headers, parserOptions)); }
+  catch { return false; }
+}
+
 function fields(text) {
   const result = new Map();
   for (const line of text.replace(/\r\n/g, '\n').replace(/\n[ \t]+/g, ' ').split('\n')) {
@@ -22,8 +34,7 @@ function fields(text) {
 export async function parseBounceReport(source) {
   if (!Buffer.isBuffer(source) || source.length > MAX_BOUNCE_BYTES) return [];
   const mail = await simpleParser(source, parserOptions);
-  const contentType = mail.headers.get('content-type');
-  if (contentType?.value?.toLowerCase() !== 'multipart/report' || contentType.params?.['report-type']?.toLowerCase() !== 'delivery-status') return [];
+  if (!isDeliveryStatusReport(mail)) return [];
   const returnPaths = mail.headerLines.filter(header => header.key === 'return-path').map(header => header.line.replace(/^Return-Path:\s*/i, '').trim());
   if (returnPaths.length !== 1) return [];
   const autoSubmitted = String(mail.headers.get('auto-submitted') ?? '').toLowerCase().split(/[\s;(]/)[0];

@@ -3,7 +3,9 @@ import { ImapFlow } from 'imapflow';
 import { transaction } from './db.js';
 import { audit } from './audit.js';
 import { updateCheck } from './mail-worker.js';
-import { MAX_BOUNCE_BYTES, parseBounceReport } from './bounce-report.js';
+import { MAX_BOUNCE_BYTES, isBounceReportHeader, parseBounceReport } from './bounce-report.js';
+
+const SCAN_VERSION = 2;
 
 export function bounceImapOptions(config) {
   return {
@@ -82,23 +84,26 @@ export class MailBounceMonitor {
       }
       if (!Number.isSafeInteger(nextUid) || nextUid < 1) throw new Error('MAIL_BOUNCE_UIDNEXT_MISSING');
       const maxUid = nextUid - 1;
-      const resume = checkpoint?.uidValidity === validity && Number.isSafeInteger(checkpoint.lastUid) && checkpoint.lastUid >= 0;
+      // 旧方式で見落とした退信を回収するため、判定方式の変更後は直近の期間を再走査します。
+      const resume = checkpoint?.scanVersion === SCAN_VERSION && checkpoint.uidValidity === validity
+        && Number.isSafeInteger(checkpoint.lastUid) && checkpoint.lastUid >= 0;
       let lastUid = resume ? checkpoint.lastUid : 0;
       const since = new Date(Date.now() - this.config.bounceLookbackDays * 86400000);
       const uids = lastUid < maxUid ? (await client.search({ uid: `${lastUid + 1}:${maxUid}`, ...(!resume ? { since } : {}) }, { uid: true }) || []) : [];
       const pending = uids.filter(uid => uid > lastUid && uid <= maxUid).sort((a, b) => a - b);
       const batch = pending.slice(0, 50);
-      const metadata = batch.length ? await client.fetchAll(batch, { uid: true, size: true, bodyStructure: true }, { uid: true }) : [];
+      const metadata = batch.length ? await client.fetchAll(batch, { uid: true, size: true, headers: ['content-type'] }, { uid: true }) : [];
       let bounced = 0;
       for (const message of metadata.sort((a, b) => a.uid - b.uid)) {
         if (this.stopped) throw new Error('MAIL_BOUNCE_STOPPED');
-        if (message.bodyStructure?.type?.toLowerCase() !== 'multipart/report' || message.bodyStructure.parameters?.['report-type']?.toLowerCase() !== 'delivery-status') continue;
         if (!Number.isFinite(message.size) || message.size > MAX_BOUNCE_BYTES) {
           this.logger?.warn({ errorCode: 'MAIL_BOUNCE_TOO_LARGE' }, 'mail_bounce_skipped');
           continue;
         }
+        // さくらでは BODYSTRUCTURE が退信を text/plain と返す場合があるため、実際のヘッダーを使います。
+        if (message.headers && !await isBounceReportHeader(message.headers)) continue;
         const fetched = await client.fetchOne(message.uid, { source: { maxLength: MAX_BOUNCE_BYTES + 1 } }, { uid: true });
-        if (!fetched) continue; // Another mail client may have removed it.
+        if (!fetched) continue; // 別のメールソフトによって削除された場合はスキップします。
         if (!fetched.source) throw new Error('MAIL_BOUNCE_SOURCE_MISSING');
         let reports;
         try { reports = await parseBounceReport(fetched.source); }
@@ -112,7 +117,7 @@ export class MailBounceMonitor {
       lastUid = pending.length > batch.length ? batch.at(-1) : Math.max(lastUid, maxUid);
       await this.pool.query(`INSERT INTO app_meta.admin_settings(setting_key,document) VALUES($1,$2::jsonb)
         ON CONFLICT(setting_key) DO UPDATE SET document=EXCLUDED.document,updated_at=clock_timestamp()`,
-      [this.checkpointKey, JSON.stringify({ uidValidity: validity, lastUid, lastPolledAt: new Date().toISOString() })]);
+      [this.checkpointKey, JSON.stringify({ scanVersion: SCAN_VERSION, uidValidity: validity, lastUid, lastPolledAt: new Date().toISOString() })]);
       return { scanned: batch.length, bounced };
     } finally {
       clearTimeout(deadline);
