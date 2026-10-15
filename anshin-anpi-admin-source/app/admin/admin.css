@@ -277,7 +277,7 @@
 .error-detail code { width: max-content; padding: 2px 6px; border-radius: 5px; color: #a20f14; background: #fdebec; font-size: .7rem; font-weight: 900; }
 .error-detail span { color: #536b7a; font-size: .78rem; }
 .error-status { display: inline-flex; padding: 5px 9px; border-radius: 999px; color: #9b1015; background: #fdeced; font-size: .72rem; font-weight: 900; white-space: nowrap; }
-.mail-error-acknowledge { white-space: nowrap; }
+.mail-error-acknowledge { border-color: #cbd7df; white-space: nowrap; }
 .mail-error-empty { text-align: center; color: var(--admin-muted); }
 
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, .65fr); gap: 18px; margin-top: 18px; align-items: start; }
