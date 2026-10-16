@@ -98,7 +98,7 @@ npm run provision:admin
 | `api`：`127.0.0.1:3001` | 管理 API、利用者 API、顔認証、メール処理 |
 | `postgres`：Compose 内部 `5432` | 業務データ、管理設定、監査記録 |
 
-Nginx 設定は `deploy/vps/anshin.info.conf` です。`/api/admin/` は API の `/v1/admin/`、`/v1/` と `/health/` は API、その他は管理画面へ転送します。サイトの `/` は `/admin` へ移動します。
+Nginx 設定は `deploy/vps/anshin.info.conf` です。`/api/admin/` は API の `/v1/admin/`、`/v1/` と `/health/` は API、その他は管理画面へ転送します。サイトの `/` は HTTP 404 を返します。管理画面には `/admin` からアクセスします。
 
 運用時の環境変数は `/home/debian/.config/anshin-anpi/runtime.env`、リリースの配置先は `/home/debian/anshin-anpi/releases/` です。秘密情報はリポジトリや配布イメージに含めず、環境変数ファイルの権限を `600` にします。本番のデータ暗号化は AWS KMS を使用します。`TEMPORARY_ENCRYPTION_KEY` と `AUDIT_HMAC_KEY` も継続して保持します。
 
