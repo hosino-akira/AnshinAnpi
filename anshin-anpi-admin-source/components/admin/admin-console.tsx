@@ -870,7 +870,9 @@ export default function AdminConsole() {
     if (!user) return;
     setBusy(true);
     try {
-      await adminApi(
+      const result = await adminApi<
+        { user: RegisteredUser } | { deleted: true }
+      >(
         `/users/${user.id}${deleteTarget.kind === "recipient" ? `/recipients/${deleteTarget.recipientId}` : ""}`,
         "DELETE",
         {
@@ -879,7 +881,24 @@ export default function AdminConsole() {
         },
       );
       setDeleteTarget(null);
-      closeEditor();
+      if (deleteTarget.kind === "user") {
+        closeEditor();
+      } else if ("user" in result) {
+        const updatedUser = result.user;
+        const recipientId = deleteTarget.recipientId;
+        setEditingUser((current) =>
+          current?.id === updatedUser.id
+            ? {
+                ...current,
+                revision: updatedUser.revision,
+                updatedAt: updatedUser.updatedAt,
+                recipients: current.recipients.filter(
+                  (recipient) => recipient.id !== recipientId,
+                ),
+              }
+            : current,
+        );
+      }
       await loadData();
       showFlash(
         "success",
