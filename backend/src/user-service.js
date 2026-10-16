@@ -376,8 +376,11 @@ export class UserService {
         VALUES($1,'safety',$2,$3,'granted',$4) RETURNING *`, [session.user_id, body.policy_version, request.terminal.terminal_id, request.id])).rows[0];
     }
     if (!session.verification_id || !session.verified_at || Date.now() - Date.parse(session.verified_at) >= this.config.verificationTtlSeconds * 1000) fail(401, 'FACE_VERIFICATION_EXPIRED', 'もう一度、顔を確認してください。');
-    const recipients = (await ctx.db.query(`SELECT * FROM recipients WHERE user_id=$1 AND status='active' ORDER BY order_no FOR SHARE`, [user.user_id])).rows;
-    if (!recipients.length) fail(409, 'NO_ACTIVE_RECIPIENT', '送信先をご確認ください。スタッフへお声がけください。');
+    const contacts = (await ctx.db.query(`SELECT * FROM recipients WHERE user_id=$1 AND status<>'deleted' ORDER BY order_no FOR SHARE`, [user.user_id])).rows;
+    const recipients = contacts.filter(recipient => recipient.status === 'active');
+    if (!recipients.length) fail(409, 'NO_ACTIVE_RECIPIENT', contacts.length
+      ? '有効なメール送信先がありません'
+      : 'メール送信先が登録されていません', { registered_count: contacts.length, active_count: 0 });
     const check = (await ctx.db.query(`INSERT INTO safety_checks(user_id,terminal_id,check_type,verified_at,consent_id,idempotency_key,request_sha256,expires_at)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING check_id`, [user.user_id, request.terminal.terminal_id, purpose,
       session.verified_at, consent.consent_id, ctx.key, ctx.hash, session.expires_at])).rows[0];

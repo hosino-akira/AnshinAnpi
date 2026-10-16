@@ -65,6 +65,10 @@ export function openApiDocument() {
       (paths[path][method].description ?? '') + ' 登録が完了した active の利用者と高い類似度で一致した場合だけ、409 FACE_ALREADY_REGISTERED を返します。未完了の pending_registration は再登録を妨げず、安否確認の顔認証にも使用しません。氏名が異なっていても、登録済み利用者の重複登録は許可しません。';
     if (path==='/v1/faces/liveness-sessions') paths[path][method].description='purpose=registration の場合は user_id、enrollment の場合は enrollment_id が必須です。AWS Face Liveness の動画は専用のフロントエンドコンポーネントから直接送信します。';
     if (body==='face') paths[path][method].description='image_base64（JPEG/PNG、デコード後 512 KiB 以下、data URL の接頭辞なし）または liveness_session_id のいずれかを指定します。画像モードでは生体検知を行いません。metrics のスコアは 0～100 です。有効な候補がない場合、similarity_score は null になります。登録 API は画像の品質指標だけを返します。';
+    if (path==='/v1/users/{id}/recipients') paths[path][method].description='本人確認の成功は送信可否と別に扱います。送信先0件・全件利用不可でも200、success=true、confirmed=trueを返します。0件はrecipients=[]、利用不可の宛先もstatus付きで返すため、クライアントは次の送信先画面へ進めます。status=activeのみ送信可能です。';
+    if (path==='/v1/safety-notifications' || path==='/v1/safety-checks') {
+      paths[path][method].description='有効な宛先0件の場合は409 NO_ACTIVE_RECIPIENTを返し、配信要求を作成しません。error.messageは未登録時「メール送信先が登録されていません」、全件利用不可時「有効なメール送信先がありません」。error.detailsのregistered_countとactive_countも返します。この確認は本人確認時ではなく、送信要求時に行います。';
+    }
     if (path.endsWith('/webhooks')) paths[path][method].description='SNS の署名、Topic ARN、許容時間範囲、イベント ID をバックエンドで検証します。署名のないクライアントの配信状況は受け付けません。';
   }
   for (const [method,path,summary,body] of adminRoutes) {

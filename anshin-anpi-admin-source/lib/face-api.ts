@@ -1,6 +1,6 @@
 export class FaceApiError extends Error {
   constructor(public code: string, public status: number, public retryAfterSeconds?: number,
-    public details?: Record<string, unknown>) { super(code); }
+    public details?: Record<string, unknown>, public serverMessage?: string) { super(serverMessage ?? code); }
 }
 
 // 単一ロボットは利用者 ID で操作し、端末や利用者の秘密情報を付加しません。
@@ -17,12 +17,13 @@ export async function faceApi<T>(path: string, method = 'GET', body?: unknown, u
   });
   const result: unknown = await response.json();
   if (!response.ok) {
-    const failure = result as { error?: { code?: unknown; details?: { retry_after_seconds?: unknown } } } | null;
+    const failure = result as { error?: { code?: unknown; message?: unknown; details?: { retry_after_seconds?: unknown } } } | null;
     const code = failure?.error?.code;
     const retry = failure?.error?.details?.retry_after_seconds;
     throw new FaceApiError(typeof code === 'string' ? code : 'REQUEST_FAILED', response.status,
       typeof retry === 'number' && Number.isFinite(retry) && retry > 0 ? Math.ceil(retry) : undefined,
-      failure?.error?.details as Record<string, unknown> | undefined);
+      failure?.error?.details as Record<string, unknown> | undefined,
+      typeof failure?.error?.message === 'string' ? failure.error.message : undefined);
   }
   return result as T;
 }

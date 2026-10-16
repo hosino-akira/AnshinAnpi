@@ -796,13 +796,14 @@ export default function Home() {
         // 確認後に宛先が削除・要修正になった場合も、理由を表示して送信先画面へ戻します。
         setSafetyContacts(undefined);
         setScreen("SCR-12");
-        setFaceError("送信先をご確認ください。スタッフへお声がけください。");
+        setFaceError(cause.serverMessage ?? "有効なメール送信先がありません");
         const userId = faceSession.current?.user_id;
         if (userId) {
           try {
             const refreshed = await faceClient.confirmRecipients(userId, true);
             checkActive();
             setSafetyContacts(refreshed);
+            setFaceError(recipientAvailability(refreshed.recipients).warning || cause.serverMessage || "有効なメール送信先がありません");
           } catch { /* 再取得に失敗しても送信は許可しません。 */ }
         }
         return;
@@ -824,7 +825,7 @@ export default function Home() {
         setFaceError(
           cause.status === 429
             ? `操作が制限されています。${cause.retryAfterSeconds ? `${cause.retryAfterSeconds} 秒後に` : "しばらくしてから"}再試行してください。`
-            : `${messages[cause.code] ?? "顔認証 API の処理が完了しませんでした。"}（${cause.code}）` +
+            : `${messages[cause.code] ?? cause.serverMessage ?? "顔認証 API の処理が完了しませんでした。"}（${cause.code}）` +
                 (typeof cause.details?.aws_error ===
                 "string"
                   ? ` ${cause.details.aws_error}`
@@ -1003,7 +1004,7 @@ export default function Home() {
         )
           throw new Error("本人確認と送信への同意を行ってください。");
         if (safetyAvailability.availableCount === 0)
-          throw new FaceApiError("NO_ACTIVE_RECIPIENT", 409);
+          throw new FaceApiError("NO_ACTIVE_RECIPIENT", 409, undefined, undefined, safetyAvailability.warning);
         const result = await faceClient.notifySafety(
           current.user_id,
           true,
@@ -1748,8 +1749,14 @@ export default function Home() {
               primary={
                 <Button
                   className="touch-button primary-button"
-                  onClick={() => setScreen("SCR-13")}
-                  disabled={safetyAvailability.availableCount === 0}
+                  onClick={() => {
+                    if (safetyAvailability.warning) {
+                      setFaceError(safetyAvailability.warning);
+                      return;
+                    }
+                    setFaceError("");
+                    setScreen("SCR-13");
+                  }}
                 >
                   安否確認メールを送る
                   <ChevronRight />
@@ -1817,7 +1824,7 @@ export default function Home() {
               primary={
                 <Button
                   className="touch-button primary-button send-button"
-                  disabled={!sendAgreed || safetyAvailability.availableCount === 0}
+                  disabled={!sendAgreed}
                   onClick={() => void sendSafetyMail()}
                 >
                   <ShieldCheck />
